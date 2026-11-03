@@ -344,15 +344,15 @@ footer { margin-top: 40px; padding: 22px 0 40px; border-top: 1px solid var(--rul
         extra: '<div class="extra"><label for="time-n">Or type the count</label><input type="number" id="time-n" min="1" step="1" inputmode="numeric"></div>' }
     ] },
     { id: "trend", name: "Trend", qs: [
-      { id: "trend", q: function (t) { return "What is the trend on the " + t.mid + " chart, compared with your " + t.low + " zone?"; },
-        help: '<details class="help"><summary>How to check</summary><p>A trend is 3 segments: 3 moves in one direction.</p><ol>' +
+      { id: "trend", q: function (t) { return "When price triggers your " + t.low + " zone, which way will the " + t.mid + " trend be going?"; },
+        help: '<details class="help"><summary>How to check</summary><p>A trend is 3 segments: 3 moves in one direction. The two charts do not need to match. You only want to know what the <b data-tf="mid"></b> trend will be doing when price reaches your zone.</p><ol>' +
               '<li>Highlight the zone on the <b data-tf="low"></b> chart.</li>' +
               '<li>Hop up to the <b data-tf="mid"></b> chart.</li>' +
-              '<li>If price hits a demand or supply zone there, note which way the <b data-tf="mid"></b> trend is going.</li></ol></details>',
+              '<li>Picture price arriving at your zone. Note which way the <b data-tf="mid"></b> trend will be going at that moment.</li></ol></details>',
         opts: [
-          { label: "Same trend on both charts", sub: "", pts: 4 },
-          { label: "No trend", sub: "", pts: 2 },
-          { label: "Counter trend", sub: "", pts: 0 }
+          { label: "With the zone", sub: "Mid trend points the way the zone trades: up for demand, down for supply.", pts: 4 },
+          { label: "No trend", sub: "Mid chart is sideways or unclear.", pts: 2 },
+          { label: "Against the zone", sub: "Mid trend points the other way from the zone.", pts: 0 }
         ] }
     ] },
     { id: "strength", name: "Strength", qs: [

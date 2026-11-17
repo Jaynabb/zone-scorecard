@@ -43,6 +43,7 @@ int width_w = input.int(60, 'Weekly Zone Width (bars)', minval=2, group=visual_g
 int width_m = input.int(90, 'Monthly Zone Width (bars)', minval=2, group=visual_group)
 bool anchor_base = input.bool(false, 'Anchor Zones To Their Base Candle', group=visual_group, tooltip='On: each zone starts at the base candle it was built from, like the original drawing. Off: zones use the widths above and end at the right margin.')
 color highlight_color = input.color(color.white, 'Nearest Zone Outline', group=visual_group)
+int target_tr = input.int(40, 'Target Zone Fill Transparency', minval=0, maxval=100, group=visual_group, tooltip='The two target zones (white outline) use this fill transparency instead of their timeframe value, so they stand out boldly.')
 color label_color = input.color(color.white, 'Text Color', group=visual_group)
 bool show_zigzag = input.bool(true, 'Show Zig Zag (chart timeframe)', group=visual_group)
 bool show_labels = input.bool(false, 'Show Swing Labels (chart timeframe)', group=visual_group)
@@ -398,7 +399,7 @@ refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<bo
             box b = zones.get(best).b
             [bk, tag] = backing(slot, is_supply, b)
             bool is_target = shown == 0 and do_highlight
-            b.set_bgcolor(color.new(base, tr))
+            b.set_bgcolor(color.new(base, is_target ? target_tr : tr))
             b.set_border_style(line.style_solid)
             b.set_text(is_target or label_targets_only ? "" : nm + (is_supply ? " SUPPLY" : " DEMAND"))
             if is_target

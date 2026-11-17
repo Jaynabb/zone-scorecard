@@ -336,12 +336,13 @@ process_slot(int slot, int mode, bool show, array<Zone> sup, array<Zone> dem, bo
 // width per timeframe measured back from the last candle (Daily shortest, Monthly longest).
 method size_all(array<Zone> zones, int slot, int right_time) =>
     if zones.size() > 0
+        int left_bar = math.max(bar_index - zone_width(slot), 0)
         for i = 0 to zones.size() - 1
             box b = zones.get(i).b
             if anchor_base
                 b.set_right(right_time)
             else
-                b.set_xloc(bar_index - zone_width(slot), bar_index + 5, xloc.bar_index)
+                b.set_xloc(left_bar, bar_index + 5, xloc.bar_index)
 
 method overlaps_any(array<box> boxes, float top, float btm) =>
     bool hit = false
@@ -419,15 +420,15 @@ process_slot(1, mode_w, show_w, sup_w, dem_w, w_sf, w_st, w_sb, w_stm, w_df, w_d
 // Monthly is never lower than a Daily or Weekly chart, so it reuses the Weekly lower-tf arrays, which are ignored unless mode is 2
 process_slot(2, mode_m, show_m, sup_m, dem_m, m_sf, m_st, m_sb, m_stm, m_df, m_dt, m_db, m_dtm, m_c, m_h, m_l, m_a, w_sf_a, w_st_a, w_sb_a, w_stm_a, w_df_a, w_dt_a, w_db_a, w_dtm_a, w_c_a, w_h_a, w_l_a, w_a_a)
 
-int future_time = time + (5 * timeframe.in_seconds() * 1000)
-sup_d.size_all(0, future_time)
-dem_d.size_all(0, future_time)
-sup_w.size_all(1, future_time)
-dem_w.size_all(1, future_time)
-sup_m.size_all(2, future_time)
-dem_m.size_all(2, future_time)
-
 if barstate.islast
+    // size the boxes once, on the last bar, so no box is ever positioned off the start of the chart
+    int future_time = time + (5 * timeframe.in_seconds() * 1000)
+    sup_d.size_all(0, future_time)
+    dem_d.size_all(0, future_time)
+    sup_w.size_all(1, future_time)
+    dem_w.size_all(1, future_time)
+    sup_m.size_all(2, future_time)
+    dem_m.size_all(2, future_time)
     while tgt_labels.size() > 0
         tgt_labels.pop().delete()
     // TARGET applies only to the chart timeframe, where the entry is taken

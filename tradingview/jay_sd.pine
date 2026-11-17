@@ -40,6 +40,8 @@ int transp_d = input.int(86, 'Daily Fill Transparency', minval=0, maxval=100, gr
 bool show_zigzag = input.bool(true, 'Show Zig Zag (chart timeframe)', group=visual_group)
 bool show_labels = input.bool(false, 'Show Swing Labels (chart timeframe)', group=visual_group)
 color zigzag_color = input.color(color.gray, 'ZigZag Color', group=visual_group)
+bool hollow_htf = input.bool(true, 'Higher Timeframes As Hollow Frames', group=visual_group, tooltip='Zones from timeframes above the chart are drawn as dashed outlines with no fill, so a chart timeframe zone sitting inside one reads as a solid box in a frame.')
+bool backing_fill = input.bool(true, 'Stronger Fill With Higher Timeframe Backing', group=visual_group, tooltip='A chart timeframe zone that overlaps one higher timeframe zone is filled darker, two higher timeframes darker still.')
 bool label_targets_only = input.bool(true, 'Label Only The Target Zones', group=visual_group, tooltip='Only the white outlined zones (the nearest on each side) get a label: timeframe, side, price range and the word TARGET, placed in the margin right of the last candle. Other boxes stay unlabeled. Turn off to also print timeframe and side inside every box.')
 
 //-----------------------------------------------------------------------------
@@ -189,14 +191,41 @@ zone_style(int slot) =>
     string nm = slot == 2 ? "MONTHLY" : slot == 1 ? "WEEKLY" : "DAILY"
     [w, tr, nm]
 
-zone_text(int slot, bool is_supply, box b) =>
+// true when any zone in the list overlaps the price range
+method any_overlap(array<Zone> zones, float top, float btm) =>
+    bool hit = false
+    if zones.size() > 0
+        for i = 0 to zones.size() - 1
+            box ob = zones.get(i).b
+            if top >= ob.get_bottom() and btm <= ob.get_top()
+                hit := true
+                break
+    hit
+
+// Higher timeframe backing for a zone of the given slot: returns [count, tag] such as [2, " +W +M"].
+backing(int slot, bool is_supply, box b) =>
+    float top = b.get_top()
+    float btm = b.get_bottom()
+    int cnt = 0
+    string tag = ""
+    if slot < 1 and show_w
+        if (is_supply ? sup_w : dem_w).any_overlap(top, btm)
+            cnt += 1
+            tag := tag + " +W"
+    if slot < 2 and show_m
+        if (is_supply ? sup_m : dem_m).any_overlap(top, btm)
+            cnt += 1
+            tag := tag + " +M"
+    [cnt, tag]
+
+zone_text(int slot, bool is_supply, box b, string tag) =>
     [w, tr, nm] = zone_style(slot)
-    nm + (is_supply ? " SUPPLY" : " DEMAND") + " " + str.tostring(b.get_bottom(), format.mintick) + " - " + str.tostring(b.get_top(), format.mintick) + "  TARGET"
+    nm + (is_supply ? " SUPPLY" : " DEMAND") + " " + str.tostring(b.get_bottom(), format.mintick) + " - " + str.tostring(b.get_top(), format.mintick) + "  TARGET" + tag
 
 // Puts the target label in the empty space to the right of the last candle, where no candle can cover it.
-mark_target(int slot, bool is_supply, box b) =>
+mark_target(int slot, bool is_supply, box b, string tag) =>
     float mid = (b.get_top() + b.get_bottom()) / 2
-    label l = label.new(bar_index + 2, mid, zone_text(slot, is_supply, b), xloc=xloc.bar_index, style=label.style_label_left, color=highlight_color, textcolor=color.black, size=size.small)
+    label l = label.new(bar_index + 2, mid, zone_text(slot, is_supply, b, tag), xloc=xloc.bar_index, style=label.style_label_left, color=highlight_color, textcolor=color.black, size=size.small)
     tgt_labels.push(l)
 
 method trim(array<Zone> zones, int limit) =>
@@ -320,7 +349,7 @@ method hide_all(array<Zone> zones, bool is_supply) =>
 // Draw only the nearest show_n zones on this side. Hide the rest. White outline on the closest one if asked.
 // With use_filter, a zone is eligible only if it overlaps one of the anchor boxes (the visible chart timeframe zones).
 // Returns the boxes that ended up visible.
-refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<box> anchors, bool use_filter) =>
+refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<box> anchors, bool use_filter, bool hollow) =>
     [w, tr, nm] = zone_style(slot)
     color base = is_supply ? supply_color : demand_color
     array<box> shown_boxes = array.new<box>()
@@ -348,15 +377,18 @@ refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<bo
             if best < 0
                 break
             box b = zones.get(best).b
-            b.set_bgcolor(color.new(base, tr))
+            [bk, tag] = backing(slot, is_supply, b)
+            int fill_tr = backing_fill and not hollow ? math.max(tr - 14 * bk, 30) : tr
+            b.set_bgcolor(hollow ? color.new(base, 100) : color.new(base, fill_tr))
+            b.set_border_style(hollow ? line.style_dashed : line.style_solid)
             b.set_text(label_targets_only ? "" : nm + (is_supply ? " SUPPLY" : " DEMAND"))
             if shown == 0 and do_highlight
                 b.set_border_color(highlight_color)
                 b.set_border_width(3)
-                mark_target(slot, is_supply, b)
+                mark_target(slot, is_supply, b, tag)
             else
                 b.set_border_color(base)
-                b.set_border_width(w)
+                b.set_border_width(hollow ? 2 : w)
             dist.set(best, na)
             shown_boxes.push(b)
             shown += 1
@@ -388,14 +420,14 @@ if barstate.islast
     array<box> a_s = array.new<box>()
     array<box> a_d = array.new<box>()
     if anchor_slot == 0
-        a_s := refresh(sup_d, true, 0, hl_d, a_s, false)
-        a_d := refresh(dem_d, false, 0, hl_d, a_d, false)
+        a_s := refresh(sup_d, true, 0, hl_d, a_s, false, false)
+        a_d := refresh(dem_d, false, 0, hl_d, a_d, false, false)
     else if anchor_slot == 1
-        a_s := refresh(sup_w, true, 1, hl_w, a_s, false)
-        a_d := refresh(dem_w, false, 1, hl_w, a_d, false)
+        a_s := refresh(sup_w, true, 1, hl_w, a_s, false, false)
+        a_d := refresh(dem_w, false, 1, hl_w, a_d, false, false)
     else
-        a_s := refresh(sup_m, true, 2, false, a_s, false)
-        a_d := refresh(dem_m, false, 2, false, a_d, false)
+        a_s := refresh(sup_m, true, 2, false, a_s, false, false)
+        a_d := refresh(dem_m, false, 2, false, a_d, false, false)
     // Timeframes below the chart are never drawn: entries are taken on the chart timeframe, not inside it.
     // Timeframes above the chart follow the correlation rule.
     if anchor_slot != 0
@@ -403,18 +435,18 @@ if barstate.islast
             sup_d.hide_all(true)
             dem_d.hide_all(false)
         else
-            refresh(sup_d, true, 0, hl_d, a_s, corr_only)
-            refresh(dem_d, false, 0, hl_d, a_d, corr_only)
+            refresh(sup_d, true, 0, hl_d, a_s, corr_only, hollow_htf)
+            refresh(dem_d, false, 0, hl_d, a_d, corr_only, hollow_htf)
     if anchor_slot != 1
         if mode_w == 2
             sup_w.hide_all(true)
             dem_w.hide_all(false)
         else
-            refresh(sup_w, true, 1, hl_w, a_s, corr_only)
-            refresh(dem_w, false, 1, hl_w, a_d, corr_only)
+            refresh(sup_w, true, 1, hl_w, a_s, corr_only, hollow_htf)
+            refresh(dem_w, false, 1, hl_w, a_d, corr_only, hollow_htf)
     if anchor_slot != 2
-        refresh(sup_m, true, 2, false, a_s, corr_only)
-        refresh(dem_m, false, 2, false, a_d, corr_only)
+        refresh(sup_m, true, 2, false, a_s, corr_only, hollow_htf)
+        refresh(dem_m, false, 2, false, a_d, corr_only, hollow_htf)
 
 //-----------------------------------------------------------------------------
 // ZIG ZAG AND SWING LABELS (chart timeframe only)

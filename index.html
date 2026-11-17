@@ -180,6 +180,9 @@ ul, ol { list-style: none; }
 .breakdown { display: none; }
 
 /* ---------- trend check tool ---------- */
+.tt { margin-top: 26px; padding-top: 18px; border-top: 1px solid var(--rule); }
+.tt-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
+.tt-head h3 { font: 400 26px/1.1 var(--serif); margin: 0; }
 .tt-form { display: grid; gap: 16px; margin-top: 16px; max-width: 720px; }
 .tt-uploads { display: grid; grid-template-columns: 1fr; gap: 10px; }
 .drop {
@@ -303,8 +306,8 @@ footer { margin-top: 40px; padding: 22px 0 40px; border-top: 1px solid var(--rul
         <!-- scoring checks are inserted here by script -->
       </div>
 
-      <section class="check" id="trendtool" aria-labelledby="tt-h">
-        <div class="check-head"><h2 id="tt-h">Trend check</h2><span class="max">Second opinion</span></div>
+      <div class="tt" id="trendtool" role="group" aria-labelledby="tt-h" hidden>
+        <div class="tt-head"><h3 id="tt-h">Check it with a screenshot</h3><span class="max">Second opinion</span></div>
         <p class="hint">Upload two chart screenshots and Claude reads what the Mid trend will be when price reaches your zone. Images are resized in your browser before upload.</p>
         <form class="tt-form" id="ttForm" autocomplete="off" novalidate>
           <div class="field">
@@ -334,7 +337,7 @@ footer { margin-top: 40px; padding: 22px 0 40px; border-top: 1px solid var(--rul
           <p class="status" id="ttStatus" role="status"></p>
         </form>
         <div class="tt-result" id="ttResult" hidden aria-live="polite"></div>
-      </section>
+      </div>
 
       <section class="check" id="logit" aria-labelledby="log-h">
         <div class="check-head"><h2 id="log-h">Log this setup</h2></div>
@@ -800,8 +803,10 @@ footer { margin-top: 40px; padding: 22px 0 40px; border-top: 1px solid var(--rul
     setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 0);
   });
 
-  /* ---------- trend check tool ---------- */
+  /* ---------- trend check tool (lives inside the Trend check) ---------- */
   (function trendTool() {
+    var ttHost = $("c-trend"), ttEl = $("trendtool");
+    if (ttHost && ttEl) { ttHost.appendChild(ttEl); ttEl.hidden = false; }
     var MAX_FILE = 5 * 1024 * 1024;
     var MAX_SIDE = 1600;
     var imgs = [null, null];

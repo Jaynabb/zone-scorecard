@@ -107,8 +107,8 @@ export async function gate(req, res) {
   const direction = String(body.direction || "").toUpperCase();
   if (direction !== "BUY" && direction !== "SELL") return { error: [400, { error: "Pick Buy or Sell." }] };
 
+  // Optional: when empty, the function falls back to the TARGET tag the Jay S&D indicator puts on the chart.
   const zone = String(body.zone || "").replace(/\s+/g, " ").trim();
-  if (!zone) return { error: [400, { error: "Describe which zone is the target." }] };
   if (zone.length > MAX_ZONE_CHARS) return { error: [400, { error: `Zone text must be ${MAX_ZONE_CHARS} characters or fewer.` }] };
 
   const images = Array.isArray(body.images) ? body.images : [];

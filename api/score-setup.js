@@ -19,9 +19,10 @@ const check = (optionEnum, extra) => ({
 const SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["zone_found", "range", "time", "trend", "strength_move", "strength_structure", "purity", "rrr", "notes"],
+  required: ["zone_found", "target_zone", "range", "time", "trend", "strength_move", "strength_structure", "purity", "rrr", "notes"],
   properties: {
     zone_found: { type: "boolean" },
+    target_zone: { type: "string" },
     range: check(["top_or_bottom", "middle", "opposite", "unclear"]),
     time: check(["one_to_three", "four_to_six", "seven_plus", "unclear"], { candles: { type: ["integer", "null"] } }),
     trend: check(["with_zone", "no_trend", "against_zone", "unclear"], {
@@ -39,9 +40,18 @@ const SCHEMA = {
 
 function buildPrompt(direction, zone, tf) {
   const low = tf.low || "Low", mid = tf.mid || "Mid", high = tf.high || "High";
+  const side = direction === "SELL" ? "SUPPLY" : "DEMAND";
+  const zoneText = zone
+    ? "The trader is going to " + direction + " from the target zone: " + zone + ". "
+    : "The trader is going to " + direction + ". The target zone is the box in Screenshot 2 whose label ends with the word TARGET on the " + side + " side, " +
+      "that is the nearest " + side + " box to price, drawn with a thick white outline. Read its exact price range from its label. ";
   return "You are pre-filling a supply and demand zone scorecard for a trader. The trader reviews every answer, so be honest about uncertainty. " +
     "Screenshot 1 is the Mid timeframe (" + mid + "). Screenshot 2 is the Low timeframe (" + low + ") and shows the target zone. " +
-    "The trader is going to " + direction + " from the target zone: " + zone + ". " +
+    zoneText +
+    "The charts carry the trader's own indicator. Supply zones are red boxes and demand zones are green boxes. Every box label names its timeframe and side and its price range, " +
+    "for example DAILY DEMAND 1720.31 - 1743.28. The nearest box on each side of price has a thick white outline and its label ends with TARGET. " +
+    "Boxes of the chart's own timeframe are the entry zones. Boxes from higher timeframes are drawn only where they overlap an entry zone, which marks correlation. " +
+    "The zone's left edge is the base candle it was built from. Use the price range in the label as the zone's exact top and bottom. " +
     "How the charts are drawn (TradingView, dark theme): the range comes from the High timeframe (" + high + ") and is shown on every chart as a retracement tool with horizontal levels labeled by percentage: 100.00% is the top of the range, 0.00% is the bottom, with 75.00% and 25.00% in between. " +
     "The band from 75% to 100% is the top of the range, the band from 25% to 75% is the middle, and the band from 0% to 25% is the bottom. Use the percentage labels first. The top and bottom bands are usually shaded purple and the middle band blue or olive, but go by the labels when colors differ. " +
     "Price levels on the right axis can help you place a zone relative to the range levels. " +
@@ -60,7 +70,8 @@ function buildPrompt(direction, zone, tf) {
     "5. STRENGTH_STRUCTURE: did the move-out candle close past the previous supply or demand on the left side of the zone? This is oppositional structure. 'yes' or 'no'. If the previous zone is not in view, say 'unclear'. " +
     "6. PURITY: since the zone broke out, on the Low chart, has price come back into it? 'never' means never retouched. 'once' means retouched one time and less than halfway into the zone. 'multiple' means more than one retouch, or any touch deeper than halfway. " +
     "7. RRR: only if a position tool or entry, stop and target with readable numbers is visible, give the reward per 1 risk as a ratio and pick 'five_plus', 'three_to_five' or 'under_three'. Otherwise 'not_visible'. Never guess this one. " +
-    "Set zone_found to false if you cannot identify the target zone from the description. Use 'unclear' for any check you cannot read with reasonable confidence instead of guessing, and explain why in the reason. " +
+    "Set target_zone to the label of the zone you scored, including its price range, for example DAILY SUPPLY 1987.55 - 2018.59. " +
+    "Set zone_found to false if you cannot identify the target zone. Use 'unclear' for any check you cannot read with reasonable confidence instead of guessing, and explain why in the reason. " +
     "Keep each reason to one or two short sentences a trader can verify on the chart. Put anything else worth knowing in notes. Reply as JSON only.";
 }
 
@@ -118,6 +129,7 @@ export default async function handler(req, res) {
   return send(res, 200, {
     direction: g.direction,
     zone_found: Boolean(p.zone_found),
+    target_zone: String(p.target_zone || ""),
     checks: {
       range: pack(p.range, MAP.range),
       time,

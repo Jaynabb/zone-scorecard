@@ -310,7 +310,7 @@ footer { margin-top: 40px; padding: 22px 0 40px; border-top: 1px solid var(--rul
         </section>
         <section class="check" id="aiscore" aria-labelledby="ai-h">
           <div class="check-head"><h2 id="ai-h">Score from screenshots</h2><span class="max">Suggest, then confirm</span></div>
-          <p class="hint">Upload your Mid and Low charts with the range bands and zones drawn. Claude suggests an answer for each check below, with a reason. You confirm or change every one before it counts.</p>
+          <p class="hint">Upload your Mid and Low charts with the Jay S&amp;D zones on. Pick Buy or Sell and the scorer reads the box tagged TARGET on that side. Claude suggests an answer for each check below, with a reason. You confirm or change every one before it counts.</p>
           <form class="tt-form" id="aiForm" autocomplete="off" novalidate>
             <div class="field">
               <span style="font-weight:600;font-size:15px" id="ai-dir-l">Direction</span>
@@ -331,7 +331,7 @@ footer { margin-top: 40px; padding: 22px 0 40px; border-top: 1px solid var(--rul
                 <img class="preview" id="aiPrev2" alt="Screenshot 2 preview" hidden>
               </label>
             </div>
-            <div class="field"><label for="aiZone">Which zone is the target?</label><input type="text" id="aiZone" maxlength="300" placeholder="The WEEKLY supply box above the top purple band"></div>
+            <div class="field"><label for="aiZone">Which zone is the target? <small style="font-weight:400;color:var(--slate)">Optional</small></label><input type="text" id="aiZone" maxlength="300" placeholder="Leave empty to use the box tagged TARGET on your chart"></div>
             <div class="actions">
               <button class="btn" type="submit" id="aiBtn">Suggest scores</button>
               <button class="btn ghost" type="button" id="aiClear">Clear</button>
@@ -900,7 +900,6 @@ footer { margin-top: 40px; padding: 22px 0 40px; border-top: 1px solid var(--rul
         if (!this.dir()) return "Pick Buy or Sell.";
         if (!imgs[0]) return "Add screenshot 1, the Mid timeframe.";
         if (!imgs[1]) return "Add screenshot 2, the Low timeframe with the target zone.";
-        if (!this.zone()) return "Describe which zone is the target.";
         return "";
       },
       payload: function (extra) {
@@ -1015,10 +1014,12 @@ footer { margin-top: 40px; padding: 22px 0 40px; border-top: 1px solid var(--rul
       var u = update();
       aiLast = { at: Date.now(), checks: data.checks, notes: data.notes || "", model: data.model || "" };
 
-      var warn = data.zone_found === false ? '<p style="color:var(--fail);margin-top:6px"><b>The model could not find the target zone.</b> Check the zone description and the Low screenshot.</p>' : "";
+      var warn = data.zone_found === false ? '<p style="color:var(--fail);margin-top:6px"><b>The model could not find the target zone.</b> Check that the TARGET box is in the Low screenshot, or describe the zone.</p>' : "";
+      var tz = data.target_zone ? '<p style="margin-top:6px">Scored zone: <b>' + esc(data.target_zone) + '</b></p>' : "";
       resultEl.className = "tt-result ai-summary " + (unsure ? "partial" : "match");
       resultEl.innerHTML =
         '<div class="tt-verdict"><strong>' + (unsure ? "REVIEW" : "SUGGESTED") + '</strong><span class="ai-pts">' + u.r.total + '/' + MAX + ' so far</span></div>' +
+        tz +
         '<p style="margin-top:6px">' + filled + ' of ' + QMETA.length + ' answers pre-selected' + (unsure ? ', ' + unsure + ' left for you' : '') + '. Each check below shows the reason. Change anything you disagree with.</p>' +
         warn +
         (data.notes ? '<h4>Notes</h4><p>' + esc(data.notes) + '</p>' : "") +

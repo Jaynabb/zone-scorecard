@@ -48,9 +48,10 @@ function buildPrompt(direction, zone, tf) {
   return "You are pre-filling a supply and demand zone scorecard for a trader. The trader reviews every answer, so be honest about uncertainty. " +
     "Screenshot 1 is the Mid timeframe (" + mid + "). Screenshot 2 is the Low timeframe (" + low + ") and shows the target zone. " +
     zoneText +
-    "The charts carry the trader's own indicator. Supply zones are red boxes and demand zones are green boxes. Every box label names its timeframe and side and its price range, " +
-    "for example DAILY DEMAND 1720.31 - 1743.28. The nearest box on each side of price has a thick white outline and its label ends with TARGET. " +
-    "Boxes of the chart's own timeframe are the entry zones. Boxes from higher timeframes are drawn only where they overlap an entry zone, which marks correlation. " +
+    "The charts carry the trader's own indicator. Supply zones are red boxes and demand zones are green boxes. " +
+    "Only the nearest box on each side of price is labeled: it has a thick white outline and a label with its timeframe, side, price range and the word TARGET, " +
+    "for example DAILY DEMAND 1720.31 - 1743.28 TARGET. Other boxes have no label. " +
+    "Boxes of the chart's own timeframe are the entry zones. Darker boxes from higher timeframes are drawn only where they overlap an entry zone, which marks correlation. " +
     "The zone's left edge is the base candle it was built from. Use the price range in the label as the zone's exact top and bottom. " +
     "How the charts are drawn (TradingView, dark theme): the range comes from the High timeframe (" + high + ") and is shown on every chart as a retracement tool with horizontal levels labeled by percentage: 100.00% is the top of the range, 0.00% is the bottom, with 75.00% and 25.00% in between. " +
     "The band from 75% to 100% is the top of the range, the band from 25% to 75% is the middle, and the band from 0% to 25% is the bottom. Use the percentage labels first. The top and bottom bands are usually shaded purple and the middle band blue or olive, but go by the labels when colors differ. " +

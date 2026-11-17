@@ -52,7 +52,8 @@ function buildPrompt(direction, zone, tf) {
     "Only the nearest box on each side of price is labeled: it has a thick white outline and a label with its timeframe, side, price range and the word TARGET, " +
     "for example DAILY DEMAND 1720.31 - 1743.28 TARGET +W +M. A suffix +W means a Weekly zone overlaps it and +M means a Monthly zone overlaps it; no suffix means no higher timeframe backing. " +
     "Other boxes have no label. Boxes of the chart's own timeframe are the entry zones, filled solid, and a darker fill means higher timeframe backing. " +
-    "Higher timeframe zones are drawn as dashed hollow frames and only where they overlap an entry zone, which marks correlation. " +
+    "Higher timeframe zones are drawn as hollow frames: Weekly thin and dashed, Monthly thick and dotted, each with a small W or M tag at its top edge in the right margin. " +
+    "A frame around a filled entry zone marks correlation. " +
     "The zone's left edge is the base candle it was built from. Use the price range in the label as the zone's exact top and bottom. " +
     "How the charts are drawn (TradingView, dark theme): the range comes from the High timeframe (" + high + ") and is shown on every chart as a retracement tool with horizontal levels labeled by percentage: 100.00% is the top of the range, 0.00% is the bottom, with 75.00% and 25.00% in between. " +
     "The band from 75% to 100% is the top of the range, the band from 25% to 75% is the middle, and the band from 0% to 25% is the bottom. Use the percentage labels first. The top and bottom bands are usually shaded purple and the middle band blue or olive, but go by the labels when colors differ. " +

@@ -19,7 +19,7 @@ float dep_mult = input.float(1.0, 'Departure (x zone height)', minval=0.25, step
 int dep_bars = input.int(8, 'Departure Within (candles)', minval=1, maxval=20, group=filt_group, tooltip='A zone appears as soon as the impulse candle alone has departed this far, otherwise once the follow-through has, checked this many candles after the impulse.')
 float max_height_mult = input.float(4.0, 'Max Zone Height (x typical body)', minval=0.5, step=0.5, group=filt_group, tooltip='Zones taller than this many typical bodies of their own timeframe are skipped.')
 int max_touches = input.int(2, 'Remove Zone After N Touches', minval=0, group=filt_group, tooltip='A touch is price entering the zone without closing through it. 0 = never remove by touches.')
-bool corr_only = input.bool(true, 'Correlation Only For Higher Timeframes', group=filt_group, tooltip='Zones of the chart timeframe always show. Zones from higher timeframes show only where they overlap a chart timeframe zone of the same side. Zones from lower timeframes are never drawn.')
+bool corr_only = input.bool(false, 'Hide Higher Timeframe Zones Without Correlation', group=filt_group, tooltip='Off: higher timeframe zones are drawn as hollow frames wherever they are, which shows where price is heading. On: they are drawn only where they overlap a chart timeframe zone of the same side. Zones from lower timeframes are never drawn either way.')
 int show_n = input.int(3, 'Show Nearest Zones Per Side', minval=1, maxval=20, group=filt_group, tooltip='Per timeframe: draw only this many supply zones above price and demand zones below price. The rest stay in memory and appear when price moves toward them.')
 
 string tf_group = 'Timeframes'
@@ -228,6 +228,13 @@ mark_target(int slot, bool is_supply, box b, string tag) =>
     label l = label.new(bar_index + 2, mid, zone_text(slot, is_supply, b, tag), xloc=xloc.bar_index, style=label.style_label_left, color=highlight_color, textcolor=color.black, size=size.small)
     tgt_labels.push(l)
 
+// Small W or M tag at the top edge of a hollow higher timeframe frame, so stacked frames can be told apart.
+mark_frame(int slot, bool is_supply, box b) =>
+    color base = is_supply ? supply_color : demand_color
+    string t = slot == 2 ? "M" : "W"
+    label l = label.new(bar_index + 2, b.get_top(), t, xloc=xloc.bar_index, style=label.style_label_left, color=color.new(base, 20), textcolor=color.white, size=size.tiny)
+    tgt_labels.push(l)
+
 method trim(array<Zone> zones, int limit) =>
     while zones.size() > limit
         Zone z = zones.pop()
@@ -378,17 +385,21 @@ refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<bo
                 break
             box b = zones.get(best).b
             [bk, tag] = backing(slot, is_supply, b)
+            bool is_target = shown == 0 and do_highlight
             int fill_tr = backing_fill and not hollow ? math.max(tr - 14 * bk, 30) : tr
             b.set_bgcolor(hollow ? color.new(base, 100) : color.new(base, fill_tr))
-            b.set_border_style(hollow ? line.style_dashed : line.style_solid)
-            b.set_text(label_targets_only ? "" : nm + (is_supply ? " SUPPLY" : " DEMAND"))
-            if shown == 0 and do_highlight
+            // Weekly frames dashed and thin, Monthly frames dotted and thick, chart timeframe solid
+            b.set_border_style(hollow ? (slot == 2 ? line.style_dotted : line.style_dashed) : line.style_solid)
+            b.set_text(is_target or label_targets_only ? "" : nm + (is_supply ? " SUPPLY" : " DEMAND"))
+            if is_target
                 b.set_border_color(highlight_color)
                 b.set_border_width(3)
                 mark_target(slot, is_supply, b, tag)
             else
                 b.set_border_color(base)
-                b.set_border_width(hollow ? 2 : w)
+                b.set_border_width(hollow ? (slot == 2 ? 3 : 1) : w)
+                if hollow
+                    mark_frame(slot, is_supply, b)
             dist.set(best, na)
             shown_boxes.push(b)
             shown += 1

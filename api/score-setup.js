@@ -48,13 +48,12 @@ function buildPrompt(direction, zone, tf) {
   return "You are pre-filling a supply and demand zone scorecard for a trader. The trader reviews every answer, so be honest about uncertainty. " +
     "Screenshot 1 is the Mid timeframe (" + mid + "). Screenshot 2 is the Low timeframe (" + low + ") and shows the target zone. " +
     zoneText +
-    "The charts carry the trader's own indicator. Supply zones are red boxes and demand zones are green boxes. " +
+    "The charts carry the trader's own indicator. Supply zones are red boxes and demand zones are green boxes, filled, and all end at the right margin. " +
+    "Timeframe is shown by shade and width: Daily zones are the lightest shade and the shortest boxes, Weekly zones a medium shade and longer, Monthly zones the darkest shade and the longest. " +
+    "Where zones of different timeframes overlap, the fills stack and the shorter box sits inside the longer one: that is correlation. " +
     "Only the nearest box on each side of price is labeled: it has a thick white outline and a label with its timeframe, side, price range and the word TARGET, " +
     "for example DAILY DEMAND 1720.31 - 1743.28 TARGET +W +M. A suffix +W means a Weekly zone overlaps it and +M means a Monthly zone overlaps it; no suffix means no higher timeframe backing. " +
-    "Other boxes have no label. Boxes of the chart's own timeframe are the entry zones, filled solid, and a darker fill means higher timeframe backing. " +
-    "Higher timeframe zones are drawn as hollow outlines with a tag in the right margin, for example WEEKLY DEMAND or MONTHLY SUPPLY. " +
-    "A yellow outline and tag means a Weekly zone sitting on top of an entry zone, an orange outline and tag means a Monthly zone sitting on top of an entry zone: that is correlation. " +
-    "A red or green hollow outline is a standalone higher timeframe zone with no entry zone inside it. " +
+    "Other boxes have no label. Boxes of the chart's own timeframe are the entry zones. " +
     "The zone's left edge is the base candle it was built from. Use the price range in the label as the zone's exact top and bottom. " +
     "How the charts are drawn (TradingView, dark theme): the range comes from the High timeframe (" + high + ") and is shown on every chart as a retracement tool with horizontal levels labeled by percentage: 100.00% is the top of the range, 0.00% is the bottom, with 75.00% and 25.00% in between. " +
     "The band from 75% to 100% is the top of the range, the band from 25% to 75% is the middle, and the band from 0% to 25% is the bottom. Use the percentage labels first. The top and bottom bands are usually shaded purple and the middle band blue or olive, but go by the labels when colors differ. " +

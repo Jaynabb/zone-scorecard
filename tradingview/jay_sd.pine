@@ -29,21 +29,25 @@ bool show_m = input.bool(true, 'Monthly zones', group=tf_group)
 bool highlight_nearest = input.bool(true, 'Outline Nearest Zones In White', group=tf_group, tooltip='On the chart timeframe, the closest supply above price and the closest demand below price get a white border and a TARGET label. Higher timeframe frames are never tagged as targets.')
 
 string visual_group = 'Visual Settings'
-color supply_color = input.color(#F23645, 'Supply Color', group=visual_group)
-color demand_color = input.color(#089981, 'Demand Color', group=visual_group)
+color sup_d_col = input.color(#FF6B6B, 'Daily Supply', group=visual_group, inline='sd')
+color sup_w_col = input.color(#E03131, 'Weekly Supply', group=visual_group, inline='sw')
+color sup_m_col = input.color(#8B0000, 'Monthly Supply', group=visual_group, inline='sm')
+color dem_d_col = input.color(#69DB7C, 'Daily Demand', group=visual_group, inline='sd')
+color dem_w_col = input.color(#089981, 'Weekly Demand', group=visual_group, inline='sw')
+color dem_m_col = input.color(#004D40, 'Monthly Demand', group=visual_group, inline='sm')
+int transp_d = input.int(78, 'Daily Fill Transparency', minval=0, maxval=100, group=visual_group)
+int transp_w = input.int(70, 'Weekly Fill Transparency', minval=0, maxval=100, group=visual_group)
+int transp_m = input.int(60, 'Monthly Fill Transparency', minval=0, maxval=100, group=visual_group)
+int width_d = input.int(30, 'Daily Zone Width (bars)', minval=2, group=visual_group, tooltip='How many chart bars wide each zone is drawn, measured back from the last candle. Daily shortest, Weekly longer, Monthly longest, so a stack of zones shows its correlation by size.')
+int width_w = input.int(60, 'Weekly Zone Width (bars)', minval=2, group=visual_group)
+int width_m = input.int(90, 'Monthly Zone Width (bars)', minval=2, group=visual_group)
+bool anchor_base = input.bool(false, 'Anchor Zones To Their Base Candle', group=visual_group, tooltip='On: each zone starts at the base candle it was built from, like the original drawing. Off: zones use the widths above and end at the right margin.')
 color highlight_color = input.color(color.white, 'Nearest Zone Outline', group=visual_group)
 color label_color = input.color(color.white, 'Text Color', group=visual_group)
-int transp_m = input.int(70, 'Monthly Fill Transparency', minval=0, maxval=100, group=visual_group)
-int transp_w = input.int(78, 'Weekly Fill Transparency', minval=0, maxval=100, group=visual_group)
-int transp_d = input.int(86, 'Daily Fill Transparency', minval=0, maxval=100, group=visual_group)
 bool show_zigzag = input.bool(true, 'Show Zig Zag (chart timeframe)', group=visual_group)
 bool show_labels = input.bool(false, 'Show Swing Labels (chart timeframe)', group=visual_group)
 color zigzag_color = input.color(color.gray, 'ZigZag Color', group=visual_group)
-bool hollow_htf = input.bool(true, 'Higher Timeframes As Hollow Frames', group=visual_group, tooltip='Zones from timeframes above the chart are drawn as outlines with no fill, yellow for Weekly and orange for Monthly, so a chart timeframe zone sitting inside one reads as a solid box in a colored frame.')
-bool backing_fill = input.bool(true, 'Stronger Fill With Higher Timeframe Backing', group=visual_group, tooltip='A chart timeframe zone that overlaps one higher timeframe zone is filled darker, two higher timeframes darker still.')
 bool label_targets_only = input.bool(true, 'Label Only The Target Zones', group=visual_group, tooltip='Only the white outlined zones (the nearest on each side) get a label: timeframe, side, price range and the word TARGET, placed in the margin right of the last candle. Other boxes stay unlabeled. Turn off to also print timeframe and side inside every box.')
-color weekly_color = input.color(#FFD400, 'Weekly Correlation Color', group=visual_group, tooltip='A Weekly frame that sits on top of a chart timeframe zone is drawn in this color, with a matching tag. Standalone Weekly frames stay in the supply or demand color.')
-color monthly_color = input.color(#FF8C00, 'Monthly Correlation Color', group=visual_group, tooltip='A Monthly frame that sits on top of a chart timeframe zone is drawn in this color, with a matching tag. Standalone Monthly frames stay in the supply or demand color.')
 
 //-----------------------------------------------------------------------------
 // TYPES, ARRAYS & GLOBALS
@@ -192,6 +196,12 @@ zone_style(int slot) =>
     string nm = slot == 2 ? "MONTHLY" : slot == 1 ? "WEEKLY" : "DAILY"
     [w, tr, nm]
 
+zone_color(int slot, bool is_supply) =>
+    is_supply ? (slot == 2 ? sup_m_col : slot == 1 ? sup_w_col : sup_d_col) : (slot == 2 ? dem_m_col : slot == 1 ? dem_w_col : dem_d_col)
+
+zone_width(int slot) =>
+    slot == 2 ? width_m : slot == 1 ? width_w : width_d
+
 // true when any zone in the list overlaps the price range
 method any_overlap(array<Zone> zones, float top, float btm) =>
     bool hit = false
@@ -229,15 +239,6 @@ mark_target(int slot, bool is_supply, box b, string tag) =>
     label l = label.new(bar_index + 2, mid, zone_text(slot, is_supply, b, tag), xloc=xloc.bar_index, style=label.style_label_left, color=highlight_color, textcolor=color.black, size=size.small)
     tgt_labels.push(l)
 
-// Tag for a hollow higher timeframe frame. Correlated frames (sitting on a chart timeframe zone) use the
-// timeframe color, standalone frames use the plain supply or demand color.
-mark_frame(int slot, bool is_supply, box b, color fc) =>
-    string t = (slot == 2 ? "MONTHLY" : "WEEKLY") + (is_supply ? " SUPPLY" : " DEMAND")
-    // Weekly tag on the top edge, Monthly tag on the bottom edge, so frames sharing an edge do not overlap
-    float y = slot == 2 ? b.get_bottom() : b.get_top()
-    label l = label.new(bar_index + 2, y, t, xloc=xloc.bar_index, style=label.style_label_left, color=color.new(color.black, 100), textcolor=fc, size=size.small)
-    tgt_labels.push(l)
-
 method trim(array<Zone> zones, int limit) =>
     while zones.size() > limit
         Zone z = zones.pop()
@@ -267,8 +268,8 @@ create_zone(array<Zone> zones, bool is_supply, float z_top, float z_btm, int lef
         ok := false
     if ok and not zones.overlaps(top, btm)
         [w, tr, nm] = zone_style(slot)
-        color base = is_supply ? supply_color : demand_color
-        box b = box.new(left_time, top, time, btm, xloc=xloc.bar_time, border_color=base, border_width=w, bgcolor=color.new(base, tr), text=nm + (is_supply ? " SUPPLY" : " DEMAND"), text_color=label_color, text_size=size.small, text_halign=text.align_right, text_valign=text.align_center, extend=extend.right)
+        color base = zone_color(slot, is_supply)
+        box b = box.new(left_time, top, time, btm, xloc=xloc.bar_time, border_color=base, border_width=w, bgcolor=color.new(base, tr), text="", text_color=label_color, text_size=size.small, text_halign=text.align_right, text_valign=text.align_center, extend=extend.none)
         zones.unshift(Zone.new(b))
         zones.trim(max_zones)
 
@@ -331,10 +332,16 @@ process_slot(int slot, int mode, bool show, array<Zone> sup, array<Zone> dem, bo
             monitor(sup, true, h_c, h_h, h_l)
             monitor(dem, false, h_c, h_h, h_l)
 
-method extend_all(array<Zone> zones, int right_time) =>
+// Sizes every box: either anchored at its base candle and extended to the right margin, or a fixed
+// width per timeframe measured back from the last candle (Daily shortest, Monthly longest).
+method size_all(array<Zone> zones, int slot, int right_time) =>
     if zones.size() > 0
         for i = 0 to zones.size() - 1
-            zones.get(i).b.set_right(right_time)
+            box b = zones.get(i).b
+            if anchor_base
+                b.set_right(right_time)
+            else
+                b.set_xloc(bar_index - zone_width(slot), bar_index + 5, xloc.bar_index)
 
 method overlaps_any(array<box> boxes, float top, float btm) =>
     bool hit = false
@@ -347,8 +354,8 @@ method overlaps_any(array<box> boxes, float top, float btm) =>
     hit
 
 // Hides every zone in the list. Used for timeframes below the chart timeframe.
-method hide_all(array<Zone> zones, bool is_supply) =>
-    color base = is_supply ? supply_color : demand_color
+method hide_all(array<Zone> zones, bool is_supply, int slot) =>
+    color base = zone_color(slot, is_supply)
     if zones.size() > 0
         for i = 0 to zones.size() - 1
             box b = zones.get(i).b
@@ -359,9 +366,9 @@ method hide_all(array<Zone> zones, bool is_supply) =>
 // Draw only the nearest show_n zones on this side. Hide the rest. White outline on the closest one if asked.
 // With use_filter, a zone is eligible only if it overlaps one of the anchor boxes (the visible chart timeframe zones).
 // Returns the boxes that ended up visible.
-refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<box> anchors, bool use_filter, bool hollow) =>
+refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<box> anchors, bool use_filter) =>
     [w, tr, nm] = zone_style(slot)
-    color base = is_supply ? supply_color : demand_color
+    color base = zone_color(slot, is_supply)
     array<box> shown_boxes = array.new<box>()
     int n = zones.size()
     if n > 0
@@ -389,12 +396,7 @@ refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<bo
             box b = zones.get(best).b
             [bk, tag] = backing(slot, is_supply, b)
             bool is_target = shown == 0 and do_highlight
-            int fill_tr = backing_fill and not hollow ? math.max(tr - 14 * bk, 30) : tr
-            b.set_bgcolor(hollow ? color.new(base, 100) : color.new(base, fill_tr))
-            // Higher timeframe frames: yellow (Weekly) or orange (Monthly) only when they sit on a chart timeframe zone,
-            // otherwise the plain supply or demand color. Chart timeframe zones: solid border in the zone color.
-            bool correlated = hollow and anchors.overlaps_any(b.get_top(), b.get_bottom())
-            color frame_col = correlated ? (slot == 2 ? monthly_color : weekly_color) : base
+            b.set_bgcolor(color.new(base, tr))
             b.set_border_style(line.style_solid)
             b.set_text(is_target or label_targets_only ? "" : nm + (is_supply ? " SUPPLY" : " DEMAND"))
             if is_target
@@ -402,10 +404,8 @@ refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<bo
                 b.set_border_width(3)
                 mark_target(slot, is_supply, b, tag)
             else
-                b.set_border_color(hollow ? frame_col : base)
-                b.set_border_width(hollow ? 2 : w)
-                if hollow
-                    mark_frame(slot, is_supply, b, frame_col)
+                b.set_border_color(base)
+                b.set_border_width(w)
             dist.set(best, na)
             shown_boxes.push(b)
             shown += 1
@@ -420,12 +420,12 @@ process_slot(1, mode_w, show_w, sup_w, dem_w, w_sf, w_st, w_sb, w_stm, w_df, w_d
 process_slot(2, mode_m, show_m, sup_m, dem_m, m_sf, m_st, m_sb, m_stm, m_df, m_dt, m_db, m_dtm, m_c, m_h, m_l, m_a, w_sf_a, w_st_a, w_sb_a, w_stm_a, w_df_a, w_dt_a, w_db_a, w_dtm_a, w_c_a, w_h_a, w_l_a, w_a_a)
 
 int future_time = time + (5 * timeframe.in_seconds() * 1000)
-sup_d.extend_all(future_time)
-dem_d.extend_all(future_time)
-sup_w.extend_all(future_time)
-dem_w.extend_all(future_time)
-sup_m.extend_all(future_time)
-dem_m.extend_all(future_time)
+sup_d.size_all(0, future_time)
+dem_d.size_all(0, future_time)
+sup_w.size_all(1, future_time)
+dem_w.size_all(1, future_time)
+sup_m.size_all(2, future_time)
+dem_m.size_all(2, future_time)
 
 if barstate.islast
     while tgt_labels.size() > 0
@@ -439,33 +439,33 @@ if barstate.islast
     array<box> a_s = array.new<box>()
     array<box> a_d = array.new<box>()
     if anchor_slot == 0
-        a_s := refresh(sup_d, true, 0, hl_d, a_s, false, false)
-        a_d := refresh(dem_d, false, 0, hl_d, a_d, false, false)
+        a_s := refresh(sup_d, true, 0, hl_d, a_s, false)
+        a_d := refresh(dem_d, false, 0, hl_d, a_d, false)
     else if anchor_slot == 1
-        a_s := refresh(sup_w, true, 1, hl_w, a_s, false, false)
-        a_d := refresh(dem_w, false, 1, hl_w, a_d, false, false)
+        a_s := refresh(sup_w, true, 1, hl_w, a_s, false)
+        a_d := refresh(dem_w, false, 1, hl_w, a_d, false)
     else
-        a_s := refresh(sup_m, true, 2, hl_m, a_s, false, false)
-        a_d := refresh(dem_m, false, 2, hl_m, a_d, false, false)
+        a_s := refresh(sup_m, true, 2, hl_m, a_s, false)
+        a_d := refresh(dem_m, false, 2, hl_m, a_d, false)
     // Timeframes below the chart are never drawn: entries are taken on the chart timeframe, not inside it.
     // Timeframes above the chart follow the correlation rule.
     if anchor_slot != 0
         if mode_d == 2
-            sup_d.hide_all(true)
-            dem_d.hide_all(false)
+            sup_d.hide_all(true, 0)
+            dem_d.hide_all(false, 0)
         else
-            refresh(sup_d, true, 0, hl_d, a_s, corr_only, hollow_htf)
-            refresh(dem_d, false, 0, hl_d, a_d, corr_only, hollow_htf)
+            refresh(sup_d, true, 0, hl_d, a_s, corr_only)
+            refresh(dem_d, false, 0, hl_d, a_d, corr_only)
     if anchor_slot != 1
         if mode_w == 2
-            sup_w.hide_all(true)
-            dem_w.hide_all(false)
+            sup_w.hide_all(true, 1)
+            dem_w.hide_all(false, 1)
         else
-            refresh(sup_w, true, 1, hl_w, a_s, corr_only, hollow_htf)
-            refresh(dem_w, false, 1, hl_w, a_d, corr_only, hollow_htf)
+            refresh(sup_w, true, 1, hl_w, a_s, corr_only)
+            refresh(dem_w, false, 1, hl_w, a_d, corr_only)
     if anchor_slot != 2
-        refresh(sup_m, true, 2, false, a_s, corr_only, hollow_htf)
-        refresh(dem_m, false, 2, false, a_d, corr_only, hollow_htf)
+        refresh(sup_m, true, 2, false, a_s, corr_only)
+        refresh(dem_m, false, 2, false, a_d, corr_only)
 
 //-----------------------------------------------------------------------------
 // ZIG ZAG AND SWING LABELS (chart timeframe only)

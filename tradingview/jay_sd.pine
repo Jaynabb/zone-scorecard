@@ -26,8 +26,7 @@ string tf_group = 'Timeframes'
 bool show_d = input.bool(true, 'Daily zones', group=tf_group)
 bool show_w = input.bool(true, 'Weekly zones', group=tf_group)
 bool show_m = input.bool(true, 'Monthly zones', group=tf_group)
-bool highlight_nearest = input.bool(true, 'Outline nearest Daily zones in white', group=tf_group, tooltip='The closest Daily supply above price and the closest Daily demand below price get a white border, on any chart.')
-bool highlight_weekly = input.bool(true, 'Outline nearest Weekly zones too', group=tf_group, tooltip='Same white outline for the closest Weekly supply above price and Weekly demand below price.')
+bool highlight_nearest = input.bool(true, 'Outline Nearest Zones In White', group=tf_group, tooltip='On the chart timeframe, the closest supply above price and the closest demand below price get a white border and a TARGET label. Higher timeframe frames are never tagged as targets.')
 
 string visual_group = 'Visual Settings'
 color supply_color = input.color(#F23645, 'Supply Color', group=visual_group)
@@ -234,7 +233,9 @@ mark_target(int slot, bool is_supply, box b, string tag) =>
 mark_frame(int slot, bool is_supply, box b) =>
     color fc = slot == 2 ? monthly_color : weekly_color
     string t = (slot == 2 ? "MONTHLY" : "WEEKLY") + (is_supply ? " SUPPLY" : " DEMAND")
-    label l = label.new(bar_index + 2, b.get_top(), t, xloc=xloc.bar_index, style=label.style_label_left, color=color.new(color.black, 100), textcolor=fc, size=size.small)
+    // Weekly tag on the top edge, Monthly tag on the bottom edge, so frames sharing an edge do not overlap
+    float y = slot == 2 ? b.get_bottom() : b.get_top()
+    label l = label.new(bar_index + 2, y, t, xloc=xloc.bar_index, style=label.style_label_left, color=color.new(color.black, 100), textcolor=fc, size=size.small)
     tgt_labels.push(l)
 
 method trim(array<Zone> zones, int limit) =>
@@ -427,8 +428,10 @@ dem_m.extend_all(future_time)
 if barstate.islast
     while tgt_labels.size() > 0
         tgt_labels.pop().delete()
-    bool hl_d = highlight_nearest and show_d
-    bool hl_w = highlight_nearest and highlight_weekly and show_w
+    // TARGET applies only to the chart timeframe, where the entry is taken
+    bool hl_d = highlight_nearest and show_d and mode_d == 0
+    bool hl_w = highlight_nearest and show_w and mode_w == 0
+    bool hl_m = highlight_nearest and show_m and mode_m == 0
     // the anchor is the timeframe that matches the chart; below Daily, Daily is the anchor
     int anchor_slot = mode_d == 0 ? 0 : mode_w == 0 ? 1 : mode_m == 0 ? 2 : 0
     array<box> a_s = array.new<box>()
@@ -440,8 +443,8 @@ if barstate.islast
         a_s := refresh(sup_w, true, 1, hl_w, a_s, false, false)
         a_d := refresh(dem_w, false, 1, hl_w, a_d, false, false)
     else
-        a_s := refresh(sup_m, true, 2, false, a_s, false, false)
-        a_d := refresh(dem_m, false, 2, false, a_d, false, false)
+        a_s := refresh(sup_m, true, 2, hl_m, a_s, false, false)
+        a_d := refresh(dem_m, false, 2, hl_m, a_d, false, false)
     // Timeframes below the chart are never drawn: entries are taken on the chart timeframe, not inside it.
     // Timeframes above the chart follow the correlation rule.
     if anchor_slot != 0

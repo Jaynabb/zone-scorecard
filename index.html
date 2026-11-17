@@ -103,6 +103,12 @@ ul, ol { list-style: none; }
 .help { margin-top: 12px; font-size: 15px; color: var(--slate); max-width: 56ch; }
 .help summary { cursor: pointer; font-weight: 600; color: var(--ink); width: fit-content; padding: 4px 0; }
 .help ol { list-style: decimal; padding-left: 22px; margin-top: 6px; display: grid; gap: 4px; }
+.rules { margin-top: 18px; padding: 16px 18px 14px; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); max-width: 56ch; font-size: 15px; line-height: 1.5; color: var(--slate); }
+.rules h3 { font: 400 24px/1.1 var(--serif); color: var(--ink); margin: 0 0 10px; }
+.rules h4 { font-size: 15px; font-weight: 600; color: var(--ink); margin: 12px 0 2px; }
+.rules p { margin: 0; }
+.rules b { color: var(--ink); font-weight: 600; }
+.rules ol { list-style: decimal; padding-left: 22px; margin: 4px 0 0; display: grid; gap: 4px; }
 
 /* ---------- timeframes ---------- */
 .presets { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
@@ -353,7 +359,16 @@ footer { margin-top: 40px; padding: 22px 0 40px; border-top: 1px solid var(--rul
           { label: "With the zone", sub: "Mid trend points the way the zone trades: up for demand, down for supply.", pts: 4 },
           { label: "No trend", sub: "Mid chart is sideways or unclear.", pts: 2 },
           { label: "Against the zone", sub: "Mid trend points the other way from the zone.", pts: 0 }
-        ] }
+        ],
+        rules: '<div class="rules"><h3>Trend check (4 points)</h3>' +
+               '<h4>Ask</h4><p>What will the trend be on the Mid timeframe (<b data-tf="mid"></b>) when price reaches the target zone? The Low timeframe (<b data-tf="low"></b>) zone is the target. Trace price to it on the Mid timeframe, then read the Mid trend as it will be on arrival. For supply, price travels up into the zone. For demand, price travels down into it.</p>' +
+               '<h4>A trend is 3 segments</h4><ol>' +
+               '<li>An impulse that breaks the control point.</li>' +
+               '<li>A pullback to a pivot.</li>' +
+               '<li>A new impulse past the last extreme.</li></ol>' +
+               '<h4>Control point</h4><p>The lower high in a downtrend, the higher low in an uptrend. Only candle closes count, never wicks. The trend holds until a candle closes through the control point.</p>' +
+               '<h4>Score</h4><p><b>4/4</b> same trend as the trade. <b>2/4</b> no trend (sideways). <b>0/4</b> counter-trend. A sell matches a downtrend and a buy matches an uptrend.</p>' +
+               '<h4>Shortcut</h4><p>If the zone sits well short of any Mid timeframe zone or level that could flip the trend, the trend cannot change on the way, so skip the tracing.</p></div>' }
     ] },
     { id: "strength", name: "Strength", qs: [
       { id: "str1", q: function (t) { return "Was the move out of the zone 2x the zone or greater?"; },
@@ -431,7 +446,7 @@ footer { margin-top: 40px; padding: 22px 0 40px; border-top: 1px solid var(--rul
           (o.sub ? '<span class="opt-sub">' + esc(o.sub) + '</span>' : '') + '</span>' +
           '<span class="opt-pts">' + (o.pts ? "+" + o.pts : "0") + '</span></label>';
       });
-      html += '</div>' + (q.extra || "") + (q.help || "") + '</fieldset>';
+      html += '</div>' + (q.extra || "") + (q.help || "") + (q.rules || "") + '</fieldset>';
     });
     sec.innerHTML = html;
     checksEl.appendChild(sec);

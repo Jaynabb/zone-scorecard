@@ -42,8 +42,9 @@ function buildPrompt(direction, zone, tf) {
   return "You are pre-filling a supply and demand zone scorecard for a trader. The trader reviews every answer, so be honest about uncertainty. " +
     "Screenshot 1 is the Mid timeframe (" + mid + "). Screenshot 2 is the Low timeframe (" + low + ") and shows the target zone. " +
     "The trader is going to " + direction + " from the target zone: " + zone + ". " +
-    "How the charts are drawn (TradingView, dark theme): the range comes from the High timeframe (" + high + ") and is shown on every chart as three horizontal bands. " +
-    "The upper purple band is the top of the range, the blue band is the middle of the range, the lower purple band is the bottom of the range. " +
+    "How the charts are drawn (TradingView, dark theme): the range comes from the High timeframe (" + high + ") and is shown on every chart as a retracement tool with horizontal levels labeled by percentage: 100.00% is the top of the range, 0.00% is the bottom, with 75.00% and 25.00% in between. " +
+    "The band from 75% to 100% is the top of the range, the band from 25% to 75% is the middle, and the band from 0% to 25% is the bottom. Use the percentage labels first. The top and bottom bands are usually shaded purple and the middle band blue or olive, but go by the labels when colors differ. " +
+    "Price levels on the right axis can help you place a zone relative to the range levels. " +
     "Supply zones are red or pink rectangles labeled with their timeframe, for example WEEKLY or MONTHLY. Demand zones are green rectangles labeled the same way. " +
     "Yellow dashed lines are the cursor crosshair, ignore them. Only candle closes count, never wicks, unless a check says otherwise. " +
     "For a sell, price travels up into the zone. For a buy, price travels down into it. " +

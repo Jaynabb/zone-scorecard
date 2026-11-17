@@ -179,10 +179,7 @@ ul, ol { list-style: none; }
 .verdict span { display: none; }
 .breakdown { display: none; }
 
-/* ---------- trend check tool ---------- */
-.tt { margin-top: 26px; padding-top: 18px; border-top: 1px solid var(--rule); }
-.tt-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
-.tt-head h3 { font: 400 26px/1.1 var(--serif); margin: 0; }
+/* ---------- screenshot scorer ---------- */
 .tt-form { display: grid; gap: 16px; margin-top: 16px; max-width: 720px; }
 .tt-uploads { display: grid; grid-template-columns: 1fr; gap: 10px; }
 .drop {
@@ -344,39 +341,6 @@ footer { margin-top: 40px; padding: 22px 0 40px; border-top: 1px solid var(--rul
           <div class="tt-result ai-summary" id="aiResult" hidden aria-live="polite"></div>
         </section>
         <!-- scoring checks are inserted here by script -->
-      </div>
-
-      <div class="tt" id="trendtool" role="group" aria-labelledby="tt-h" hidden>
-        <div class="tt-head"><h3 id="tt-h">Check it with a screenshot</h3><span class="max">Second opinion</span></div>
-        <p class="hint">Upload two chart screenshots and Claude reads what the Mid trend will be when price reaches your zone. Images are resized in your browser before upload.</p>
-        <form class="tt-form" id="ttForm" autocomplete="off" novalidate>
-          <div class="field">
-            <span style="font-weight:600;font-size:15px" id="tt-dir-l">Direction</span>
-            <div class="dir" role="radiogroup" aria-labelledby="tt-dir-l">
-              <label class="chip"><input type="radio" name="ttdir" value="BUY"><span>Buy</span></label>
-              <label class="chip"><input type="radio" name="ttdir" value="SELL"><span>Sell</span></label>
-            </div>
-          </div>
-          <div class="tt-uploads">
-            <label class="drop" id="drop1">
-              <input type="file" accept="image/*" id="ttImg1" aria-describedby="tt-d1">
-              <span class="drop-body"><b>Screenshot 1</b><small id="tt-d1">Mid timeframe (<span data-tf="mid"></span>)</small><span class="drop-cta" id="ttCta1">Tap to choose an image</span></span>
-              <img class="preview" id="ttPrev1" alt="Screenshot 1 preview" hidden>
-            </label>
-            <label class="drop" id="drop2">
-              <input type="file" accept="image/*" id="ttImg2" aria-describedby="tt-d2">
-              <span class="drop-body"><b>Screenshot 2</b><small id="tt-d2">Low timeframe (<span data-tf="low"></span>), showing the target zone</small><span class="drop-cta" id="ttCta2">Tap to choose an image</span></span>
-              <img class="preview" id="ttPrev2" alt="Screenshot 2 preview" hidden>
-            </label>
-          </div>
-          <div class="field"><label for="ttZone">Which zone is the target?</label><input type="text" id="ttZone" maxlength="300" placeholder="Daily demand at 1.0820 to 1.0850, marked in blue"></div>
-          <div class="actions">
-            <button class="btn" type="submit" id="ttBtn">Check trend</button>
-            <button class="btn ghost" type="button" id="ttClear">Clear</button>
-          </div>
-          <p class="status" id="ttStatus" role="status"></p>
-        </form>
-        <div class="tt-result" id="ttResult" hidden aria-live="polite"></div>
       </div>
 
       <section class="check" id="logit" aria-labelledby="log-h">
@@ -860,7 +824,7 @@ footer { margin-top: 40px; padding: 22px 0 40px; border-top: 1px solid var(--rul
     setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 0);
   });
 
-  /* ---------- screenshot uploads (shared by both AI tools) ---------- */
+  /* ---------- screenshot uploads ---------- */
   var MAX_FILE = 5 * 1024 * 1024;
   var MAX_SIDE = 1600;
 
@@ -979,54 +943,6 @@ footer { margin-top: 40px; padding: 22px 0 40px; border-top: 1px solid var(--rul
     else { btn.textContent = btn.getAttribute("data-label") || btn.textContent; btn.disabled = false; }
   }
 
-  /* ---------- trend check tool (lives inside the Trend check) ---------- */
-  (function trendTool() {
-    var ttHost = $("c-trend"), ttEl = $("trendtool");
-    if (ttHost && ttEl) { ttHost.appendChild(ttEl); ttEl.hidden = false; }
-    var up = makeUploader({ img: ["ttImg1", "ttImg2"], prev: ["ttPrev1", "ttPrev2"], drop: ["drop1", "drop2"], cta: ["ttCta1", "ttCta2"], dir: "ttdir", zone: "ttZone", status: "ttStatus" });
-    var resultEl = $("ttResult"), btn = $("ttBtn");
-
-    function renderResult(r) {
-      var score = Number(r.score);
-      var cls = score === 4 ? "match" : (score === 2 ? "partial" : "nomatch");
-      var title = r.matches ? "MATCH" : "NO MATCH";
-      var trendWord = r.trend === "up" ? "Uptrend" : (r.trend === "down" ? "Downtrend" : "Sideways");
-      var segs = (r.segments || []).slice(0, 3);
-      while (segs.length < 3) segs.push("");
-      resultEl.className = "tt-result " + cls;
-      resultEl.innerHTML =
-        '<div class="tt-verdict"><strong>' + esc(title) + '</strong><span class="tt-score">' + esc(String(score)) + '/4</span></div>' +
-        '<p style="margin-top:6px">Mid trend on arrival: <b>' + esc(trendWord) + '</b></p>' +
-        '<h4>Segments</h4><ol>' + segs.map(function (x) { return '<li>' + esc(x || "Not identified") + '</li>'; }).join("") + '</ol>' +
-        '<h4>Control point</h4><p>' + esc(r.control_point || "Not identified") + '</p>' +
-        '<h4>Reason</h4><p>' + esc(r.reason || "") + '</p>' +
-        '<p class="tt-conf">Confidence: <b>' + esc(String(r.confidence || "unknown")) + '</b></p>' +
-        '<p class="tt-note">Second opinion only. Check the segments against your chart.</p>';
-      resultEl.hidden = false;
-    }
-
-    $("ttForm").addEventListener("submit", function (e) {
-      e.preventDefault();
-      var bad = up.validate();
-      if (bad) return up.setStatus(bad, true);
-      busy(btn, true, "Checking...");
-      resultEl.hidden = true;
-      up.setStatus("Reading both charts. This can take up to a minute.");
-      postJson("/api/trend-check", up.payload()).then(function (data) {
-        renderResult(data);
-        up.setStatus("");
-      }).catch(function (err) {
-        up.setStatus(err.message || "The check failed. Try again.", true);
-      }).then(function () { busy(btn, false); });
-    });
-
-    $("ttClear").addEventListener("click", function () {
-      up.clear();
-      resultEl.hidden = true;
-      resultEl.innerHTML = "";
-    });
-  })();
-
   /* ---------- score from screenshots (suggest, then confirm) ---------- */
   var aiLast = null; // last suggestion set, saved with the log entry
 
@@ -1062,7 +978,11 @@ footer { margin-top: 40px; padding: 22px 0 40px; border-top: 1px solid var(--rul
       if (qid === "time" && c.candles !== null && c.candles !== undefined) extra = " Counted " + c.candles + " base candles.";
       if (qid === "str1" && typeof c.ratio === "number") extra = " Move about " + (Math.round(c.ratio * 10) / 10) + "x the zone.";
       if (qid === "rrr" && c.visible && typeof c.ratio === "number") extra = " Read " + (Math.round(c.ratio * 10) / 10) + ":1 from the chart.";
-      if (qid === "trend" && c.control_point) extra = " Control point: " + c.control_point + ".";
+      if (qid === "trend") {
+        var segs = (c.segments || []).filter(function (x) { return x; });
+        if (segs.length) extra += " Segments: " + segs.map(function (x, i) { return (i + 1) + ") " + x; }).join(" ") + ".";
+        if (c.control_point) extra += " Control point: " + c.control_point + ".";
+      }
       var head = usable
         ? '<span class="ai-k">AI, ' + esc(conf) + '</span><b>' + esc(optLabel(qid, c.index)) + '</b> selected. '
         : (qid === "rrr" && !c.visible

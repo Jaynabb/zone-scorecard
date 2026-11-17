@@ -216,6 +216,14 @@ ul, ol { list-style: none; }
   .tt-uploads { grid-template-columns: 1fr 1fr; }
 }
 
+/* ---------- AI suggestions ---------- */
+.ai-tag { display: block; margin: -4px 0 10px; padding: 7px 10px; border: 1px solid var(--rule); border-left: 3px solid var(--pass); border-radius: 4px; background: var(--surface); font-size: 13px; line-height: 1.45; color: var(--slate); max-width: 56ch; }
+.ai-tag b { color: var(--ink); font-weight: 600; }
+.ai-tag.medium { border-left-color: var(--slate); }
+.ai-tag.low { border-left-color: var(--fail); border-style: dashed; }
+.ai-tag .ai-k { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink); margin-right: 6px; }
+.ai-summary .ai-pts { font: 400 26px/1 var(--serif); font-variant-numeric: tabular-nums; color: var(--ink); }
+
 /* ---------- log ---------- */
 .log-wrap { margin-top: 20px; }
 .log-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; border-top: 2px solid var(--ink); padding-top: 22px; }
@@ -302,6 +310,38 @@ footer { margin-top: 40px; padding: 22px 0 40px; border-top: 1px solid var(--rul
             <div class="field"><label for="tf-mid">Mid</label><input type="text" id="tf-mid" maxlength="12" autocomplete="off"><small>One up, for the trend</small></div>
             <div class="field"><label for="tf-high">High</label><input type="text" id="tf-high" maxlength="12" autocomplete="off"><small>For the range</small></div>
           </div>
+        </section>
+        <section class="check" id="aiscore" aria-labelledby="ai-h">
+          <div class="check-head"><h2 id="ai-h">Score from screenshots</h2><span class="max">Suggest, then confirm</span></div>
+          <p class="hint">Upload your Mid and Low charts with the range bands and zones drawn. Claude suggests an answer for each check below, with a reason. You confirm or change every one before it counts.</p>
+          <form class="tt-form" id="aiForm" autocomplete="off" novalidate>
+            <div class="field">
+              <span style="font-weight:600;font-size:15px" id="ai-dir-l">Direction</span>
+              <div class="dir" role="radiogroup" aria-labelledby="ai-dir-l">
+                <label class="chip"><input type="radio" name="aidir" value="BUY"><span>Buy</span></label>
+                <label class="chip"><input type="radio" name="aidir" value="SELL"><span>Sell</span></label>
+              </div>
+            </div>
+            <div class="tt-uploads">
+              <label class="drop" id="aidrop1">
+                <input type="file" accept="image/*" id="aiImg1" aria-describedby="ai-d1">
+                <span class="drop-body"><b>Screenshot 1</b><small id="ai-d1">Mid timeframe (<span data-tf="mid"></span>)</small><span class="drop-cta" id="aiCta1">Tap to choose an image</span></span>
+                <img class="preview" id="aiPrev1" alt="Screenshot 1 preview" hidden>
+              </label>
+              <label class="drop" id="aidrop2">
+                <input type="file" accept="image/*" id="aiImg2" aria-describedby="ai-d2">
+                <span class="drop-body"><b>Screenshot 2</b><small id="ai-d2">Low timeframe (<span data-tf="low"></span>), showing the target zone</small><span class="drop-cta" id="aiCta2">Tap to choose an image</span></span>
+                <img class="preview" id="aiPrev2" alt="Screenshot 2 preview" hidden>
+              </label>
+            </div>
+            <div class="field"><label for="aiZone">Which zone is the target?</label><input type="text" id="aiZone" maxlength="300" placeholder="The WEEKLY supply box above the top purple band"></div>
+            <div class="actions">
+              <button class="btn" type="submit" id="aiBtn">Suggest scores</button>
+              <button class="btn ghost" type="button" id="aiClear">Clear</button>
+            </div>
+            <p class="status" id="aiStatus" role="status"></p>
+          </form>
+          <div class="tt-result ai-summary" id="aiResult" hidden aria-live="polite"></div>
         </section>
         <!-- scoring checks are inserted here by script -->
       </div>
@@ -692,11 +732,26 @@ footer { margin-top: 40px; padding: 22px 0 40px; border-top: 1px solid var(--rul
     $("time-n").value = ""; $("rrr-n").value = "";
     $("instrument").value = ""; $("note").value = "";
     Array.prototype.forEach.call(document.querySelectorAll('input[name="dir"]'), function (r) { r.checked = false; });
+    if (typeof clearAiTags === "function") clearAiTags();
+    aiLast = null;
+    var aiRes = $("aiResult"); if (aiRes) { aiRes.hidden = true; aiRes.innerHTML = ""; }
     update();
   }
   $("resetBtn").addEventListener("click", function () { resetSetup(); $("status").textContent = ""; window.scrollTo({ top: 0 }); });
 
   /* ---------- trade log ---------- */
+  function aiSummary() {
+    if (!aiLast || !aiLast.checks) return null;
+    var agreed = 0, asked = 0, changed = [];
+    Object.keys(aiLast.checks).forEach(function (qid) {
+      var c = aiLast.checks[qid];
+      if (c.index === null || c.index === undefined || c.confidence === "low") return;
+      asked++;
+      if (sel[qid] === c.index) agreed++; else changed.push(qid);
+    });
+    return { agreed: agreed, asked: asked, changed: changed, notes: aiLast.notes };
+  }
+
   function today() {
     var d = new Date(), m = d.getMonth() + 1, day = d.getDate();
     return d.getFullYear() + "-" + (m < 10 ? "0" : "") + m + "-" + (day < 10 ? "0" : "") + day;
@@ -719,7 +774,8 @@ footer { margin-top: 40px; padding: 22px 0 40px; border-top: 1px solid var(--rul
       total: u.r.total,
       decision: u.r.total >= PASS ? "Trade" : "No trade",
       result: "Open",
-      note: $("note").value.trim()
+      note: $("note").value.trim(),
+      ai: aiSummary()
     });
     save("zs.log", log);
     resetSetup();
@@ -751,6 +807,7 @@ footer { margin-top: 40px; padding: 22px 0 40px; border-top: 1px solid var(--rul
         '<div class="e-score ' + (en.total >= PASS ? "pass" : "fail") + '">' + en.total + '<small>/' + MAX + '</small></div>' +
         '<div class="e-sub">' + esc(en.date) + ", " + esc(en.tfs) + ". " + esc(en.decision) + '</div>' +
         (en.note ? '<div class="e-note">' + esc(en.note) + '</div>' : "") +
+        (en.ai && en.ai.asked ? '<div class="e-note">AI agreed on ' + en.ai.agreed + ' of ' + en.ai.asked + ' checks' + (en.ai.changed && en.ai.changed.length ? ', you changed ' + esc(en.ai.changed.join(", ")) : "") + '.</div>' : "") +
         '<div class="e-tools"><label class="sr" style="position:absolute;left:-9999px" for="r' + en.id + '">Result</label>' +
         '<select id="r' + en.id + '" data-id="' + en.id + '">' + opts + '</select>' +
         '<button type="button" class="rm" data-rm="' + en.id + '">Remove</button></div>';
@@ -787,11 +844,11 @@ footer { margin-top: 40px; padding: 22px 0 40px; border-top: 1px solid var(--rul
   });
 
   $("exportBtn").addEventListener("click", function () {
-    var head = ["Date", "Instrument", "Direction", "Timeframes"].concat(CHECKS.map(function (c) { return c.name; }), ["Total", "Decision", "Result", "Note"]);
+    var head = ["Date", "Instrument", "Direction", "Timeframes"].concat(CHECKS.map(function (c) { return c.name; }), ["Total", "Decision", "Result", "Note", "AI agreed"]);
     function cell(v) { v = String(v == null ? "" : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
     var lines = [head.map(cell).join(",")];
     log.forEach(function (en) {
-      var row = [en.date, en.instrument, en.dir, en.tfs].concat(CHECKS.map(function (c) { return en.parts[c.id]; }), [en.total, en.decision, en.result, en.note]);
+      var row = [en.date, en.instrument, en.dir, en.tfs].concat(CHECKS.map(function (c) { return en.parts[c.id]; }), [en.total, en.decision, en.result, en.note, en.ai && en.ai.asked ? en.ai.agreed + "/" + en.ai.asked : ""]);
       lines.push(row.map(cell).join(","));
     });
     var blob = new Blob([lines.join("\n")], { type: "text/csv" });
@@ -803,80 +860,131 @@ footer { margin-top: 40px; padding: 22px 0 40px; border-top: 1px solid var(--rul
     setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 0);
   });
 
-  /* ---------- trend check tool (lives inside the Trend check) ---------- */
-  (function trendTool() {
-    var ttHost = $("c-trend"), ttEl = $("trendtool");
-    if (ttHost && ttEl) { ttHost.appendChild(ttEl); ttEl.hidden = false; }
-    var MAX_FILE = 5 * 1024 * 1024;
-    var MAX_SIDE = 1600;
-    var imgs = [null, null];
-    var statusEl = $("ttStatus");
-    var resultEl = $("ttResult");
-    var btn = $("ttBtn");
+  /* ---------- screenshot uploads (shared by both AI tools) ---------- */
+  var MAX_FILE = 5 * 1024 * 1024;
+  var MAX_SIDE = 1600;
 
+  function loadImage(file) {
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(file);
+      var im = new Image();
+      im.onload = function () { URL.revokeObjectURL(url); resolve(im); };
+      im.onerror = function () { URL.revokeObjectURL(url); reject(new Error("That file could not be read as an image.")); };
+      im.src = url;
+    });
+  }
+
+  function prepImage(file) {
+    if (!file) return Promise.reject(new Error("No file chosen."));
+    if (file.size > MAX_FILE) return Promise.reject(new Error("That file is over 5 MB. Pick a smaller screenshot."));
+    if (file.type && file.type.indexOf("image/") !== 0) return Promise.reject(new Error("That file is not an image."));
+    return loadImage(file).then(function (im) {
+      var w = im.naturalWidth || im.width, h = im.naturalHeight || im.height;
+      if (!w || !h) throw new Error("That image is empty.");
+      var scale = Math.min(1, MAX_SIDE / Math.max(w, h));
+      var cw = Math.max(1, Math.round(w * scale)), ch = Math.max(1, Math.round(h * scale));
+      var c = document.createElement("canvas");
+      c.width = cw; c.height = ch;
+      var ctx = c.getContext("2d");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, cw, ch);
+      ctx.drawImage(im, 0, 0, cw, ch);
+      var dataUrl = c.toDataURL("image/jpeg", 0.85);
+      return { media_type: "image/jpeg", data: dataUrl.split(",")[1], url: dataUrl, w: cw, h: ch };
+    });
+  }
+
+  // ids: { img: [id1, id2], prev: [..], drop: [..], cta: [..], dir: radioName, zone: inputId, status: id }
+  function makeUploader(ids) {
+    var imgs = [null, null];
+    var statusEl = $(ids.status);
     function setStatus(msg, bad) {
       statusEl.textContent = msg || "";
       statusEl.style.color = bad ? "var(--fail)" : "";
     }
-
-    function loadImage(file) {
-      return new Promise(function (resolve, reject) {
-        var url = URL.createObjectURL(file);
-        var im = new Image();
-        im.onload = function () { URL.revokeObjectURL(url); resolve(im); };
-        im.onerror = function () { URL.revokeObjectURL(url); reject(new Error("That file could not be read as an image.")); };
-        im.src = url;
-      });
+    function resetSlot(i) {
+      imgs[i] = null;
+      var prev = $(ids.prev[i]); prev.hidden = true; prev.removeAttribute("src");
+      $(ids.drop[i]).classList.remove("has-img");
+      $(ids.cta[i]).textContent = "Tap to choose an image";
     }
-
-    function prepImage(file) {
-      if (!file) return Promise.reject(new Error("No file chosen."));
-      if (file.size > MAX_FILE) return Promise.reject(new Error("That file is over 5 MB. Pick a smaller screenshot."));
-      if (file.type && file.type.indexOf("image/") !== 0) return Promise.reject(new Error("That file is not an image."));
-      return loadImage(file).then(function (im) {
-        var w = im.naturalWidth || im.width, h = im.naturalHeight || im.height;
-        if (!w || !h) throw new Error("That image is empty.");
-        var scale = Math.min(1, MAX_SIDE / Math.max(w, h));
-        var cw = Math.max(1, Math.round(w * scale)), ch = Math.max(1, Math.round(h * scale));
-        var c = document.createElement("canvas");
-        c.width = cw; c.height = ch;
-        var ctx = c.getContext("2d");
-        ctx.fillStyle = "#ffffff";
-        ctx.fillRect(0, 0, cw, ch);
-        ctx.drawImage(im, 0, 0, cw, ch);
-        var dataUrl = c.toDataURL("image/jpeg", 0.85);
-        return { media_type: "image/jpeg", data: dataUrl.split(",")[1], url: dataUrl, w: cw, h: ch };
-      });
-    }
-
-    function wire(n) {
-      var input = $("ttImg" + n), prev = $("ttPrev" + n), drop = $("drop" + n), cta = $("ttCta" + n);
+    ids.img.forEach(function (inputId, i) {
+      var input = $(inputId);
       input.addEventListener("change", function () {
         var file = input.files && input.files[0];
-        imgs[n - 1] = null;
-        prev.hidden = true; prev.removeAttribute("src");
-        drop.classList.remove("has-img");
-        cta.textContent = "Tap to choose an image";
+        resetSlot(i);
         if (!file) return;
-        setStatus("Preparing screenshot " + n + "...");
+        setStatus("Preparing screenshot " + (i + 1) + "...");
         prepImage(file).then(function (out) {
-          imgs[n - 1] = out;
-          prev.src = out.url; prev.hidden = false;
-          drop.classList.add("has-img");
-          cta.textContent = "Change image (" + out.w + " x " + out.h + ")";
+          imgs[i] = out;
+          var prev = $(ids.prev[i]); prev.src = out.url; prev.hidden = false;
+          $(ids.drop[i]).classList.add("has-img");
+          $(ids.cta[i]).textContent = "Change image (" + out.w + " x " + out.h + ")";
           setStatus("");
         }).catch(function (err) {
           input.value = "";
           setStatus(err.message || "Could not read that image.", true);
         });
       });
-    }
-    wire(1); wire(2);
+    });
+    return {
+      imgs: imgs,
+      setStatus: setStatus,
+      dir: function () { var r = document.querySelector('input[name="' + ids.dir + '"]:checked'); return r ? r.value : ""; },
+      zone: function () { return $(ids.zone).value.replace(/\s+/g, " ").trim(); },
+      validate: function () {
+        if (!this.dir()) return "Pick Buy or Sell.";
+        if (!imgs[0]) return "Add screenshot 1, the Mid timeframe.";
+        if (!imgs[1]) return "Add screenshot 2, the Low timeframe with the target zone.";
+        if (!this.zone()) return "Describe which zone is the target.";
+        return "";
+      },
+      payload: function (extra) {
+        return Object.assign({
+          direction: this.dir(),
+          zone: this.zone(),
+          images: [
+            { media_type: imgs[0].media_type, data: imgs[0].data },
+            { media_type: imgs[1].media_type, data: imgs[1].data }
+          ]
+        }, extra || {});
+      },
+      clear: function () {
+        [0, 1].forEach(function (i) { $(ids.img[i]).value = ""; resetSlot(i); });
+        $(ids.zone).value = "";
+        Array.prototype.forEach.call(document.querySelectorAll('input[name="' + ids.dir + '"]'), function (r) { r.checked = false; });
+        setStatus("");
+      }
+    };
+  }
 
-    function dirValue() {
-      var r = document.querySelector('input[name="ttdir"]:checked');
-      return r ? r.value : "";
-    }
+  function postJson(url, payload) {
+    return fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    }).then(function (resp) {
+      return resp.text().then(function (t) {
+        var data = null;
+        try { data = JSON.parse(t); } catch (err) {}
+        if (!resp.ok) throw new Error((data && data.error) || ("Server error " + resp.status + "."));
+        if (!data) throw new Error("The server sent an unreadable reply.");
+        return data;
+      });
+    });
+  }
+
+  function busy(btn, on, label) {
+    if (on) { btn.setAttribute("data-label", btn.textContent); btn.textContent = label; btn.disabled = true; }
+    else { btn.textContent = btn.getAttribute("data-label") || btn.textContent; btn.disabled = false; }
+  }
+
+  /* ---------- trend check tool (lives inside the Trend check) ---------- */
+  (function trendTool() {
+    var ttHost = $("c-trend"), ttEl = $("trendtool");
+    if (ttHost && ttEl) { ttHost.appendChild(ttEl); ttEl.hidden = false; }
+    var up = makeUploader({ img: ["ttImg1", "ttImg2"], prev: ["ttPrev1", "ttPrev2"], drop: ["drop1", "drop2"], cta: ["ttCta1", "ttCta2"], dir: "ttdir", zone: "ttZone", status: "ttStatus" });
+    var resultEl = $("ttResult"), btn = $("ttBtn");
 
     function renderResult(r) {
       var score = Number(r.score);
@@ -899,64 +1007,126 @@ footer { margin-top: 40px; padding: 22px 0 40px; border-top: 1px solid var(--rul
 
     $("ttForm").addEventListener("submit", function (e) {
       e.preventDefault();
-      var dir = dirValue();
-      var zone = $("ttZone").value.replace(/\s+/g, " ").trim();
-      if (!dir) return setStatus("Pick Buy or Sell.", true);
-      if (!imgs[0]) return setStatus("Add screenshot 1, the Mid timeframe.", true);
-      if (!imgs[1]) return setStatus("Add screenshot 2, the Low timeframe with the target zone.", true);
-      if (!zone) return setStatus("Describe which zone is the target.", true);
-
-      btn.disabled = true;
-      var oldLabel = btn.textContent;
-      btn.textContent = "Checking...";
+      var bad = up.validate();
+      if (bad) return up.setStatus(bad, true);
+      busy(btn, true, "Checking...");
       resultEl.hidden = true;
-      setStatus("Reading both charts. This can take up to a minute.");
-
-      var payload = {
-        direction: dir,
-        zone: zone,
-        images: [
-          { media_type: imgs[0].media_type, data: imgs[0].data },
-          { media_type: imgs[1].media_type, data: imgs[1].data }
-        ]
-      };
-
-      fetch("/api/trend-check", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      }).then(function (resp) {
-        return resp.text().then(function (t) {
-          var data = null;
-          try { data = JSON.parse(t); } catch (err) {}
-          if (!resp.ok) throw new Error((data && data.error) || ("Server error " + resp.status + "."));
-          if (!data) throw new Error("The server sent an unreadable reply.");
-          return data;
-        });
-      }).then(function (data) {
+      up.setStatus("Reading both charts. This can take up to a minute.");
+      postJson("/api/trend-check", up.payload()).then(function (data) {
         renderResult(data);
-        setStatus("");
+        up.setStatus("");
       }).catch(function (err) {
-        setStatus(err.message || "The check failed. Try again.", true);
-      }).then(function () {
-        btn.disabled = false;
-        btn.textContent = oldLabel;
-      });
+        up.setStatus(err.message || "The check failed. Try again.", true);
+      }).then(function () { busy(btn, false); });
     });
 
     $("ttClear").addEventListener("click", function () {
-      imgs = [null, null];
-      [1, 2].forEach(function (n) {
-        $("ttImg" + n).value = "";
-        var prev = $("ttPrev" + n); prev.hidden = true; prev.removeAttribute("src");
-        $("drop" + n).classList.remove("has-img");
-        $("ttCta" + n).textContent = "Tap to choose an image";
-      });
-      $("ttZone").value = "";
-      Array.prototype.forEach.call(document.querySelectorAll('input[name="ttdir"]'), function (r) { r.checked = false; });
+      up.clear();
       resultEl.hidden = true;
       resultEl.innerHTML = "";
-      setStatus("");
+    });
+  })();
+
+  /* ---------- score from screenshots (suggest, then confirm) ---------- */
+  var aiLast = null; // last suggestion set, saved with the log entry
+
+  function clearAiTags() {
+    Array.prototype.forEach.call(document.querySelectorAll(".ai-tag"), function (el) { el.remove(); });
+  }
+
+  (function aiScorer() {
+    var up = makeUploader({ img: ["aiImg1", "aiImg2"], prev: ["aiPrev1", "aiPrev2"], drop: ["aidrop1", "aidrop2"], cta: ["aiCta1", "aiCta2"], dir: "aidir", zone: "aiZone", status: "aiStatus" });
+    var resultEl = $("aiResult"), btn = $("aiBtn");
+
+    var QMETA = [
+      { id: "range", label: "Range" }, { id: "time", label: "Time" }, { id: "trend", label: "Trend" },
+      { id: "str1", label: "2x move" }, { id: "str2", label: "Oppositional structure" },
+      { id: "purity", label: "Purity" }, { id: "rrr", label: "Risk to reward" }
+    ];
+    function optLabel(qid, idx) {
+      for (var i = 0; i < CHECKS.length; i++) for (var j = 0; j < CHECKS[i].qs.length; j++) {
+        var q = CHECKS[i].qs[j];
+        if (q.id === qid && q.opts[idx]) return q.opts[idx].label;
+      }
+      return "";
+    }
+
+    function tagFor(qid, c) {
+      var legend = $("q-" + qid);
+      if (!legend) return;
+      var tag = document.createElement("div");
+      var usable = c.index !== null && c.index !== undefined && c.confidence !== "low";
+      var conf = c.confidence || "low";
+      tag.className = "ai-tag " + (usable ? conf : "low");
+      var extra = "";
+      if (qid === "time" && c.candles !== null && c.candles !== undefined) extra = " Counted " + c.candles + " base candles.";
+      if (qid === "str1" && typeof c.ratio === "number") extra = " Move about " + (Math.round(c.ratio * 10) / 10) + "x the zone.";
+      if (qid === "rrr" && c.visible && typeof c.ratio === "number") extra = " Read " + (Math.round(c.ratio * 10) / 10) + ":1 from the chart.";
+      if (qid === "trend" && c.control_point) extra = " Control point: " + c.control_point + ".";
+      var head = usable
+        ? '<span class="ai-k">AI, ' + esc(conf) + '</span><b>' + esc(optLabel(qid, c.index)) + '</b> selected. '
+        : (qid === "rrr" && !c.visible
+            ? '<span class="ai-k">AI</span><b>Not on the chart.</b> Type your reward per 1 risk. '
+            : '<span class="ai-k">AI unsure</span><b>Not selected.</b> ');
+      tag.innerHTML = head + esc((c.reason || "") + extra);
+      legend.insertAdjacentElement("afterend", tag);
+    }
+
+    function applySuggestions(data) {
+      clearAiTags();
+      var filled = 0, unsure = 0;
+      QMETA.forEach(function (m) {
+        var c = data.checks[m.id];
+        if (!c) return;
+        var usable = c.index !== null && c.index !== undefined && c.confidence !== "low";
+        if (usable) {
+          pick(m.id, c.index);
+          if (m.id === "time" && c.candles) $("time-n").value = c.candles;
+          if (m.id === "rrr" && typeof c.ratio === "number") $("rrr-n").value = Math.round(c.ratio * 10) / 10;
+          filled++;
+        } else {
+          unsure++;
+        }
+        tagFor(m.id, c);
+      });
+      // direction into the log form
+      var dir = data.direction === "BUY" ? "Buy" : "Sell";
+      Array.prototype.forEach.call(document.querySelectorAll('input[name="dir"]'), function (r) { r.checked = r.value === dir; });
+      var u = update();
+      aiLast = { at: Date.now(), checks: data.checks, notes: data.notes || "", model: data.model || "" };
+
+      var warn = data.zone_found === false ? '<p style="color:var(--fail);margin-top:6px"><b>The model could not find the target zone.</b> Check the zone description and the Low screenshot.</p>' : "";
+      resultEl.className = "tt-result ai-summary " + (unsure ? "partial" : "match");
+      resultEl.innerHTML =
+        '<div class="tt-verdict"><strong>' + (unsure ? "REVIEW" : "SUGGESTED") + '</strong><span class="ai-pts">' + u.r.total + '/' + MAX + ' so far</span></div>' +
+        '<p style="margin-top:6px">' + filled + ' of ' + QMETA.length + ' answers pre-selected' + (unsure ? ', ' + unsure + ' left for you' : '') + '. Each check below shows the reason. Change anything you disagree with.</p>' +
+        warn +
+        (data.notes ? '<h4>Notes</h4><p>' + esc(data.notes) + '</p>' : "") +
+        '<p class="tt-note">Suggestions only. The score counts what you confirm.</p>';
+      resultEl.hidden = false;
+    }
+
+    $("aiForm").addEventListener("submit", function (e) {
+      e.preventDefault();
+      var bad = up.validate();
+      if (bad) return up.setStatus(bad, true);
+      busy(btn, true, "Reading charts...");
+      resultEl.hidden = true;
+      up.setStatus("Reading both charts and answering all six checks. This can take up to a minute.");
+      postJson("/api/score-setup", up.payload({ timeframes: { low: tf.low, mid: tf.mid, high: tf.high } })).then(function (data) {
+        applySuggestions(data);
+        up.setStatus("");
+        var first = document.querySelector("#c-range");
+        if (first) first.scrollIntoView({ behavior: "smooth", block: "start" });
+      }).catch(function (err) {
+        up.setStatus(err.message || "The check failed. Try again.", true);
+      }).then(function () { busy(btn, false); });
+    });
+
+    $("aiClear").addEventListener("click", function () {
+      up.clear();
+      resultEl.hidden = true;
+      resultEl.innerHTML = "";
     });
   })();
 

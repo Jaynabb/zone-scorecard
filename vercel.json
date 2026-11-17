@@ -1,7 +1,6 @@
 {
   "functions": {
-    "api/trend-check.js": {
-      "maxDuration": 60
-    }
+    "api/trend-check.js": { "maxDuration": 60 },
+    "api/score-setup.js": { "maxDuration": 60 }
   }
 }

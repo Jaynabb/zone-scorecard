@@ -29,12 +29,12 @@ bool show_m = input.bool(true, 'Monthly zones', group=tf_group)
 bool highlight_nearest = input.bool(true, 'Outline Nearest Zones In White', group=tf_group, tooltip='On the chart timeframe, the closest supply above price and the closest demand below price get a white border and a TARGET label. Higher timeframe frames are never tagged as targets.')
 
 string visual_group = 'Visual Settings'
-color sup_d_col = input.color(#FF6B6B, 'Daily Supply', group=visual_group, inline='sd')
-color sup_w_col = input.color(#E03131, 'Weekly Supply', group=visual_group, inline='sw')
-color sup_m_col = input.color(#8B0000, 'Monthly Supply', group=visual_group, inline='sm')
-color dem_d_col = input.color(#69DB7C, 'Daily Demand', group=visual_group, inline='sd')
-color dem_w_col = input.color(#089981, 'Weekly Demand', group=visual_group, inline='sw')
-color dem_m_col = input.color(#004D40, 'Monthly Demand', group=visual_group, inline='sm')
+color sup_d_col = input.color(#FF6B6B, 'Daily Supply / Demand', group=visual_group, inline='sd')
+color sup_w_col = input.color(#E03131, 'Weekly Supply / Demand', group=visual_group, inline='sw')
+color sup_m_col = input.color(#8B0000, 'Monthly Supply / Demand', group=visual_group, inline='sm')
+color dem_d_col = input.color(#69DB7C, '', group=visual_group, inline='sd', tooltip='Daily supply and Daily demand colors.')
+color dem_w_col = input.color(#089981, '', group=visual_group, inline='sw', tooltip='Weekly supply and Weekly demand colors.')
+color dem_m_col = input.color(#004D40, '', group=visual_group, inline='sm', tooltip='Monthly supply and Monthly demand colors.')
 int transp_d = input.int(78, 'Daily Fill Transparency', minval=0, maxval=100, group=visual_group)
 int transp_w = input.int(70, 'Weekly Fill Transparency', minval=0, maxval=100, group=visual_group)
 int transp_m = input.int(60, 'Monthly Fill Transparency', minval=0, maxval=100, group=visual_group)
@@ -236,7 +236,8 @@ zone_text(int slot, bool is_supply, box b, string tag) =>
 // Puts the target label in the empty space to the right of the last candle, where no candle can cover it.
 mark_target(int slot, bool is_supply, box b, string tag) =>
     float mid = (b.get_top() + b.get_bottom()) / 2
-    label l = label.new(bar_index + 2, mid, zone_text(slot, is_supply, b, tag), xloc=xloc.bar_index, style=label.style_label_left, color=highlight_color, textcolor=color.black, size=size.small)
+    // anchored at the box's right end and extending left over the box, so it is never clipped by the price axis
+    label l = label.new(bar_index + 5, mid, zone_text(slot, is_supply, b, tag), xloc=xloc.bar_index, style=label.style_label_right, color=highlight_color, textcolor=color.black, size=size.small)
     tgt_labels.push(l)
 
 method trim(array<Zone> zones, int limit) =>

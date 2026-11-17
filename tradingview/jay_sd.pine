@@ -42,8 +42,8 @@ color zigzag_color = input.color(color.gray, 'ZigZag Color', group=visual_group)
 bool hollow_htf = input.bool(true, 'Higher Timeframes As Hollow Frames', group=visual_group, tooltip='Zones from timeframes above the chart are drawn as outlines with no fill, yellow for Weekly and orange for Monthly, so a chart timeframe zone sitting inside one reads as a solid box in a colored frame.')
 bool backing_fill = input.bool(true, 'Stronger Fill With Higher Timeframe Backing', group=visual_group, tooltip='A chart timeframe zone that overlaps one higher timeframe zone is filled darker, two higher timeframes darker still.')
 bool label_targets_only = input.bool(true, 'Label Only The Target Zones', group=visual_group, tooltip='Only the white outlined zones (the nearest on each side) get a label: timeframe, side, price range and the word TARGET, placed in the margin right of the last candle. Other boxes stay unlabeled. Turn off to also print timeframe and side inside every box.')
-color weekly_color = input.color(#FFD400, 'Weekly Frame Color', group=visual_group, tooltip='Weekly zones on a lower timeframe chart are drawn as hollow outlines in this color, with a matching tag in the right margin.')
-color monthly_color = input.color(#FF8C00, 'Monthly Frame Color', group=visual_group, tooltip='Monthly zones on a lower timeframe chart are drawn as hollow outlines in this color, with a matching tag in the right margin.')
+color weekly_color = input.color(#FFD400, 'Weekly Correlation Color', group=visual_group, tooltip='A Weekly frame that sits on top of a chart timeframe zone is drawn in this color, with a matching tag. Standalone Weekly frames stay in the supply or demand color.')
+color monthly_color = input.color(#FF8C00, 'Monthly Correlation Color', group=visual_group, tooltip='A Monthly frame that sits on top of a chart timeframe zone is drawn in this color, with a matching tag. Standalone Monthly frames stay in the supply or demand color.')
 
 //-----------------------------------------------------------------------------
 // TYPES, ARRAYS & GLOBALS
@@ -229,9 +229,9 @@ mark_target(int slot, bool is_supply, box b, string tag) =>
     label l = label.new(bar_index + 2, mid, zone_text(slot, is_supply, b, tag), xloc=xloc.bar_index, style=label.style_label_left, color=highlight_color, textcolor=color.black, size=size.small)
     tgt_labels.push(l)
 
-// Tag at the top edge of a hollow higher timeframe frame, in the frame's own color, so stacked frames can be told apart.
-mark_frame(int slot, bool is_supply, box b) =>
-    color fc = slot == 2 ? monthly_color : weekly_color
+// Tag for a hollow higher timeframe frame. Correlated frames (sitting on a chart timeframe zone) use the
+// timeframe color, standalone frames use the plain supply or demand color.
+mark_frame(int slot, bool is_supply, box b, color fc) =>
     string t = (slot == 2 ? "MONTHLY" : "WEEKLY") + (is_supply ? " SUPPLY" : " DEMAND")
     // Weekly tag on the top edge, Monthly tag on the bottom edge, so frames sharing an edge do not overlap
     float y = slot == 2 ? b.get_bottom() : b.get_top()
@@ -391,8 +391,10 @@ refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<bo
             bool is_target = shown == 0 and do_highlight
             int fill_tr = backing_fill and not hollow ? math.max(tr - 14 * bk, 30) : tr
             b.set_bgcolor(hollow ? color.new(base, 100) : color.new(base, fill_tr))
-            // Higher timeframe frames: solid outline in the timeframe color. Chart timeframe: solid border in the zone color.
-            color frame_col = slot == 2 ? monthly_color : weekly_color
+            // Higher timeframe frames: yellow (Weekly) or orange (Monthly) only when they sit on a chart timeframe zone,
+            // otherwise the plain supply or demand color. Chart timeframe zones: solid border in the zone color.
+            bool correlated = hollow and anchors.overlaps_any(b.get_top(), b.get_bottom())
+            color frame_col = correlated ? (slot == 2 ? monthly_color : weekly_color) : base
             b.set_border_style(line.style_solid)
             b.set_text(is_target or label_targets_only ? "" : nm + (is_supply ? " SUPPLY" : " DEMAND"))
             if is_target
@@ -403,7 +405,7 @@ refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<bo
                 b.set_border_color(hollow ? frame_col : base)
                 b.set_border_width(hollow ? 2 : w)
                 if hollow
-                    mark_frame(slot, is_supply, b)
+                    mark_frame(slot, is_supply, b, frame_col)
             dist.set(best, na)
             shown_boxes.push(b)
             shown += 1

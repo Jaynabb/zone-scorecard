@@ -179,6 +179,40 @@ ul, ol { list-style: none; }
 .verdict span { display: none; }
 .breakdown { display: none; }
 
+/* ---------- trend check tool ---------- */
+.tt-form { display: grid; gap: 16px; margin-top: 16px; max-width: 720px; }
+.tt-uploads { display: grid; grid-template-columns: 1fr; gap: 10px; }
+.drop {
+  position: relative; display: grid; gap: 10px; align-content: start;
+  padding: 14px; min-height: 150px;
+  border: 1px dashed var(--slate); border-radius: 6px; background: var(--surface); cursor: pointer;
+}
+.drop:hover { border-color: var(--ink); }
+.drop:has(input:focus-visible) { outline: 3px solid var(--focus); outline-offset: 2px; }
+.drop.has-img { border-style: solid; border-color: var(--ink); }
+.drop input { position: absolute; opacity: 0; inset: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.drop-body { display: grid; gap: 2px; }
+.drop-body b { font-weight: 600; }
+.drop-body small { color: var(--slate); font-size: 14px; line-height: 1.4; }
+.drop-cta { font-size: 14px; font-weight: 600; color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+.drop img { display: block; width: 100%; max-height: 260px; object-fit: contain; border-radius: 4px; background: var(--paper); border: 1px solid var(--rule); }
+.drop img[hidden] { display: none; }
+.tt-result { margin-top: 18px; padding: 18px 18px 16px; border: 1px solid var(--ink); border-top: 6px solid var(--accent); background: var(--surface); max-width: 720px; }
+.tt-result.match { --accent: var(--pass); }
+.tt-result.nomatch { --accent: var(--fail); }
+.tt-result.partial { --accent: var(--pending); }
+.tt-verdict { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.tt-verdict strong { font: 400 34px/1.1 var(--serif); color: var(--accent); letter-spacing: .01em; }
+.tt-verdict .tt-score { font: 400 26px/1 var(--serif); font-variant-numeric: tabular-nums; color: var(--ink); }
+.tt-result h4 { font-size: 15px; font-weight: 600; color: var(--ink); margin: 16px 0 4px; }
+.tt-result p { margin: 0; font-size: 15px; line-height: 1.5; color: var(--slate); }
+.tt-result ol { list-style: decimal; padding-left: 22px; margin: 4px 0 0; display: grid; gap: 4px; font-size: 15px; color: var(--slate); }
+.tt-conf { margin-top: 14px !important; font-size: 14px !important; }
+.tt-note { margin-top: 14px !important; padding-top: 12px; border-top: 1px solid var(--rule); font-size: 14px !important; font-style: italic; }
+@media (min-width: 600px) {
+  .tt-uploads { grid-template-columns: 1fr 1fr; }
+}
+
 /* ---------- log ---------- */
 .log-wrap { margin-top: 20px; }
 .log-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; border-top: 2px solid var(--ink); padding-top: 22px; }
@@ -268,6 +302,39 @@ footer { margin-top: 40px; padding: 22px 0 40px; border-top: 1px solid var(--rul
         </section>
         <!-- scoring checks are inserted here by script -->
       </div>
+
+      <section class="check" id="trendtool" aria-labelledby="tt-h">
+        <div class="check-head"><h2 id="tt-h">Trend check</h2><span class="max">Second opinion</span></div>
+        <p class="hint">Upload two chart screenshots and Claude reads what the Mid trend will be when price reaches your zone. Images are resized in your browser before upload.</p>
+        <form class="tt-form" id="ttForm" autocomplete="off" novalidate>
+          <div class="field">
+            <span style="font-weight:600;font-size:15px" id="tt-dir-l">Direction</span>
+            <div class="dir" role="radiogroup" aria-labelledby="tt-dir-l">
+              <label class="chip"><input type="radio" name="ttdir" value="BUY"><span>Buy</span></label>
+              <label class="chip"><input type="radio" name="ttdir" value="SELL"><span>Sell</span></label>
+            </div>
+          </div>
+          <div class="tt-uploads">
+            <label class="drop" id="drop1">
+              <input type="file" accept="image/*" id="ttImg1" aria-describedby="tt-d1">
+              <span class="drop-body"><b>Screenshot 1</b><small id="tt-d1">Mid timeframe (<span data-tf="mid"></span>)</small><span class="drop-cta" id="ttCta1">Tap to choose an image</span></span>
+              <img class="preview" id="ttPrev1" alt="Screenshot 1 preview" hidden>
+            </label>
+            <label class="drop" id="drop2">
+              <input type="file" accept="image/*" id="ttImg2" aria-describedby="tt-d2">
+              <span class="drop-body"><b>Screenshot 2</b><small id="tt-d2">Low timeframe (<span data-tf="low"></span>), showing the target zone</small><span class="drop-cta" id="ttCta2">Tap to choose an image</span></span>
+              <img class="preview" id="ttPrev2" alt="Screenshot 2 preview" hidden>
+            </label>
+          </div>
+          <div class="field"><label for="ttZone">Which zone is the target?</label><input type="text" id="ttZone" maxlength="300" placeholder="Daily demand at 1.0820 to 1.0850, marked in blue"></div>
+          <div class="actions">
+            <button class="btn" type="submit" id="ttBtn">Check trend</button>
+            <button class="btn ghost" type="button" id="ttClear">Clear</button>
+          </div>
+          <p class="status" id="ttStatus" role="status"></p>
+        </form>
+        <div class="tt-result" id="ttResult" hidden aria-live="polite"></div>
+      </section>
 
       <section class="check" id="logit" aria-labelledby="log-h">
         <div class="check-head"><h2 id="log-h">Log this setup</h2></div>
@@ -732,6 +799,161 @@ footer { margin-top: 40px; padding: 22px 0 40px; border-top: 1px solid var(--rul
     a.click();
     setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 0);
   });
+
+  /* ---------- trend check tool ---------- */
+  (function trendTool() {
+    var MAX_FILE = 5 * 1024 * 1024;
+    var MAX_SIDE = 1600;
+    var imgs = [null, null];
+    var statusEl = $("ttStatus");
+    var resultEl = $("ttResult");
+    var btn = $("ttBtn");
+
+    function setStatus(msg, bad) {
+      statusEl.textContent = msg || "";
+      statusEl.style.color = bad ? "var(--fail)" : "";
+    }
+
+    function loadImage(file) {
+      return new Promise(function (resolve, reject) {
+        var url = URL.createObjectURL(file);
+        var im = new Image();
+        im.onload = function () { URL.revokeObjectURL(url); resolve(im); };
+        im.onerror = function () { URL.revokeObjectURL(url); reject(new Error("That file could not be read as an image.")); };
+        im.src = url;
+      });
+    }
+
+    function prepImage(file) {
+      if (!file) return Promise.reject(new Error("No file chosen."));
+      if (file.size > MAX_FILE) return Promise.reject(new Error("That file is over 5 MB. Pick a smaller screenshot."));
+      if (file.type && file.type.indexOf("image/") !== 0) return Promise.reject(new Error("That file is not an image."));
+      return loadImage(file).then(function (im) {
+        var w = im.naturalWidth || im.width, h = im.naturalHeight || im.height;
+        if (!w || !h) throw new Error("That image is empty.");
+        var scale = Math.min(1, MAX_SIDE / Math.max(w, h));
+        var cw = Math.max(1, Math.round(w * scale)), ch = Math.max(1, Math.round(h * scale));
+        var c = document.createElement("canvas");
+        c.width = cw; c.height = ch;
+        var ctx = c.getContext("2d");
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, cw, ch);
+        ctx.drawImage(im, 0, 0, cw, ch);
+        var dataUrl = c.toDataURL("image/jpeg", 0.85);
+        return { media_type: "image/jpeg", data: dataUrl.split(",")[1], url: dataUrl, w: cw, h: ch };
+      });
+    }
+
+    function wire(n) {
+      var input = $("ttImg" + n), prev = $("ttPrev" + n), drop = $("drop" + n), cta = $("ttCta" + n);
+      input.addEventListener("change", function () {
+        var file = input.files && input.files[0];
+        imgs[n - 1] = null;
+        prev.hidden = true; prev.removeAttribute("src");
+        drop.classList.remove("has-img");
+        cta.textContent = "Tap to choose an image";
+        if (!file) return;
+        setStatus("Preparing screenshot " + n + "...");
+        prepImage(file).then(function (out) {
+          imgs[n - 1] = out;
+          prev.src = out.url; prev.hidden = false;
+          drop.classList.add("has-img");
+          cta.textContent = "Change image (" + out.w + " x " + out.h + ")";
+          setStatus("");
+        }).catch(function (err) {
+          input.value = "";
+          setStatus(err.message || "Could not read that image.", true);
+        });
+      });
+    }
+    wire(1); wire(2);
+
+    function dirValue() {
+      var r = document.querySelector('input[name="ttdir"]:checked');
+      return r ? r.value : "";
+    }
+
+    function renderResult(r) {
+      var score = Number(r.score);
+      var cls = score === 4 ? "match" : (score === 2 ? "partial" : "nomatch");
+      var title = r.matches ? "MATCH" : "NO MATCH";
+      var trendWord = r.trend === "up" ? "Uptrend" : (r.trend === "down" ? "Downtrend" : "Sideways");
+      var segs = (r.segments || []).slice(0, 3);
+      while (segs.length < 3) segs.push("");
+      resultEl.className = "tt-result " + cls;
+      resultEl.innerHTML =
+        '<div class="tt-verdict"><strong>' + esc(title) + '</strong><span class="tt-score">' + esc(String(score)) + '/4</span></div>' +
+        '<p style="margin-top:6px">Mid trend on arrival: <b>' + esc(trendWord) + '</b></p>' +
+        '<h4>Segments</h4><ol>' + segs.map(function (x) { return '<li>' + esc(x || "Not identified") + '</li>'; }).join("") + '</ol>' +
+        '<h4>Control point</h4><p>' + esc(r.control_point || "Not identified") + '</p>' +
+        '<h4>Reason</h4><p>' + esc(r.reason || "") + '</p>' +
+        '<p class="tt-conf">Confidence: <b>' + esc(String(r.confidence || "unknown")) + '</b></p>' +
+        '<p class="tt-note">Second opinion only. Check the segments against your chart.</p>';
+      resultEl.hidden = false;
+    }
+
+    $("ttForm").addEventListener("submit", function (e) {
+      e.preventDefault();
+      var dir = dirValue();
+      var zone = $("ttZone").value.replace(/\s+/g, " ").trim();
+      if (!dir) return setStatus("Pick Buy or Sell.", true);
+      if (!imgs[0]) return setStatus("Add screenshot 1, the Mid timeframe.", true);
+      if (!imgs[1]) return setStatus("Add screenshot 2, the Low timeframe with the target zone.", true);
+      if (!zone) return setStatus("Describe which zone is the target.", true);
+
+      btn.disabled = true;
+      var oldLabel = btn.textContent;
+      btn.textContent = "Checking...";
+      resultEl.hidden = true;
+      setStatus("Reading both charts. This can take up to a minute.");
+
+      var payload = {
+        direction: dir,
+        zone: zone,
+        images: [
+          { media_type: imgs[0].media_type, data: imgs[0].data },
+          { media_type: imgs[1].media_type, data: imgs[1].data }
+        ]
+      };
+
+      fetch("/api/trend-check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      }).then(function (resp) {
+        return resp.text().then(function (t) {
+          var data = null;
+          try { data = JSON.parse(t); } catch (err) {}
+          if (!resp.ok) throw new Error((data && data.error) || ("Server error " + resp.status + "."));
+          if (!data) throw new Error("The server sent an unreadable reply.");
+          return data;
+        });
+      }).then(function (data) {
+        renderResult(data);
+        setStatus("");
+      }).catch(function (err) {
+        setStatus(err.message || "The check failed. Try again.", true);
+      }).then(function () {
+        btn.disabled = false;
+        btn.textContent = oldLabel;
+      });
+    });
+
+    $("ttClear").addEventListener("click", function () {
+      imgs = [null, null];
+      [1, 2].forEach(function (n) {
+        $("ttImg" + n).value = "";
+        var prev = $("ttPrev" + n); prev.hidden = true; prev.removeAttribute("src");
+        $("drop" + n).classList.remove("has-img");
+        $("ttCta" + n).textContent = "Tap to choose an image";
+      });
+      $("ttZone").value = "";
+      Array.prototype.forEach.call(document.querySelectorAll('input[name="ttdir"]'), function (r) { r.checked = false; });
+      resultEl.hidden = true;
+      resultEl.innerHTML = "";
+      setStatus("");
+    });
+  })();
 
   renderTf();
   update();

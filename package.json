@@ -1,0 +1,10 @@
+{
+  "name": "zone-scorecard",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Zone Scorecard static site with a Trend check serverless function",
+  "type": "module",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.9.0"
+  }
+}

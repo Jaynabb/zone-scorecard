@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "api/trend-check.js": {
+      "maxDuration": 60
+    }
+  }
+}

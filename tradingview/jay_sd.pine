@@ -236,8 +236,8 @@ zone_text(int slot, bool is_supply, box b, string tag) =>
 // Puts the target label in the empty space to the right of the last candle, where no candle can cover it.
 mark_target(int slot, bool is_supply, box b, string tag) =>
     float mid = (b.get_top() + b.get_bottom()) / 2
-    // anchored at the box's right end and extending left over the box, so it is never clipped by the price axis
-    label l = label.new(bar_index + 5, mid, zone_text(slot, is_supply, b, tag), xloc=xloc.bar_index, style=label.style_label_right, color=highlight_color, textcolor=color.black, size=size.small)
+    // just outside the box's right end, extending into the right margin
+    label l = label.new(bar_index + 6, mid, zone_text(slot, is_supply, b, tag), xloc=xloc.bar_index, style=label.style_label_left, color=highlight_color, textcolor=color.black, size=size.small)
     tgt_labels.push(l)
 
 method trim(array<Zone> zones, int limit) =>

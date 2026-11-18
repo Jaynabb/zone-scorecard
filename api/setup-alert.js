@@ -73,8 +73,9 @@ export default async function handler(req, res) {
     const score = int(s.score, 0, 20);
     if (score === null) continue;
     const checks = s.checks && typeof s.checks === "object" ? s.checks : {};
+    const styleKey = (common.style || "position").toLowerCase().replace(/[^a-z]/g, "").slice(0, 12) || "position";
     const rec = Object.assign({}, common, {
-      id: symbol + ":" + side,
+      id: symbol + ":" + styleKey + ":" + side,
       side,
       zone: str(s.zone, 120),
       top: num(s.top), btm: num(s.btm),

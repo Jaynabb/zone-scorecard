@@ -90,7 +90,7 @@ li { margin: 4px 0; }
     if (typeof s.base === "number") extra.push("base " + s.base);
     if (typeof s.touches === "number") extra.push("touches " + s.touches);
     return '<tr class="' + (s.valid ? "valid" : "") + '">' +
-      "<td><b>" + esc(s.symbol) + "</b><br><span class='muted'>" + esc(s.exchange || "") + (s.price ? " · " + s.price : "") + "</span></td>" +
+      "<td><b>" + esc(s.symbol) + "</b><br><span class='muted'>" + esc(s.style || "") + (s.low_tf ? " · " + esc(s.low_tf) + " zones" : "") + (s.price ? " · " + s.price : "") + "</span></td>" +
       '<td class="side-' + esc(s.side) + '">' + esc(s.side) + "</td>" +
       "<td>" + esc(s.zone || "") + "<br><span class='muted'>" + extra.join(" · ") + "</span></td>" +
       '<td><span class="score">' + s.score + "<small>/20</small></span>" + (s.valid ? '<br><span class="chip pass">valid</span>' : "") + "</td>" +

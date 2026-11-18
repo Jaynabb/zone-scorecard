@@ -2,6 +2,7 @@
 // URL: /api/setup-alert?key=SCAN_SECRET
 import { send, clientIp } from "./_shared.js";
 import { hasRedis, pipeline } from "./_redis.js";
+import { BOARD_STYLES } from "./setups.js";
 
 // TradingView sends webhooks from these addresses (published in its alert documentation).
 // With no SCAN_SECRET set, only these senders are accepted. With SCAN_SECRET set, the ?key= must match.
@@ -46,6 +47,8 @@ export default async function handler(req, res) {
 
   const symbol = str(body.symbol, 32).trim();
   if (!symbol) return send(res, 400, { error: "symbol missing." });
+  // a style the board does not track is acknowledged and dropped, so a leftover alert cannot repopulate it
+  if (!BOARD_STYLES.has(str(body.style, 24))) return send(res, 200, { ok: true, stored: 0, ignored: "style" });
   const setups = Array.isArray(body.setups) ? body.setups.slice(0, 4) : [];
   const alertMin = int(body.alert_min, 0, 20) ?? 14;
   const now = Date.now();

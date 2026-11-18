@@ -4,6 +4,29 @@ indicator("Jay S&D", overlay=true, max_bars_back=500, max_boxes_count=500, max_l
 //-----------------------------------------------------------------------------
 // SETTINGS
 //-----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
+// TRADING STYLE: the three timeframes. Slot 0 = Low (entry zones, the targets), slot 1 = Mid (trend),
+// slot 2 = High (range and backing). Matches the presets on the Zone Scorecard site.
+//-----------------------------------------------------------------------------
+string style_group = 'Trading Style'
+string style = input.string('Position trader', 'Trading Style', options=['Position trader', 'Swing trader', 'Day trader', 'Scalper', 'Custom'], group=style_group, tooltip='Position: Daily / Weekly / Monthly. Swing: 4H / Daily / Weekly. Day trader: 15m / 1H / 4H. Scalper: 5m / 15m / 1H. Low is where the entry zones (targets) come from, Mid is the trend, High is the range and the backing. Custom uses the three inputs below.')
+string tf_low_in = input.timeframe('D', 'Custom Low Timeframe', group=style_group)
+string tf_mid_in = input.timeframe('W', 'Custom Mid Timeframe', group=style_group)
+string tf_high_in = input.timeframe('M', 'Custom High Timeframe', group=style_group)
+string TF0 = style == 'Position trader' ? 'D' : style == 'Swing trader' ? '240' : style == 'Day trader' ? '15' : style == 'Scalper' ? '5' : tf_low_in
+string TF1 = style == 'Position trader' ? 'W' : style == 'Swing trader' ? 'D' : style == 'Day trader' ? '60' : style == 'Scalper' ? '15' : tf_mid_in
+string TF2 = style == 'Position trader' ? 'M' : style == 'Swing trader' ? 'W' : style == 'Day trader' ? '240' : style == 'Scalper' ? '60' : tf_high_in
+
+// Readable names: DAILY, WEEKLY, MONTHLY, 4H, 15M ...
+tf_name(string tf) =>
+    int sec = timeframe.in_seconds(tf)
+    sec == timeframe.in_seconds("D") ? "DAILY" : sec == timeframe.in_seconds("W") ? "WEEKLY" : sec == timeframe.in_seconds("M") ? "MONTHLY" : sec % 3600 == 0 ? str.tostring(sec / 3600) + "H" : str.tostring(sec / 60) + "M"
+
+// Short tags for the backing suffix: +W, +M, +4H ...
+tf_tag(string tf) =>
+    int sec = timeframe.in_seconds(tf)
+    sec == timeframe.in_seconds("D") ? "D" : sec == timeframe.in_seconds("W") ? "W" : sec == timeframe.in_seconds("M") ? "M" : sec % 3600 == 0 ? str.tostring(sec / 3600) + "H" : str.tostring(sec / 60) + "M"
+
 string poi_group = 'Zone Settings'
 int max_zones = input.int(12, 'Max Zones Kept Per Timeframe', minval=2, group=poi_group, tooltip='Zones kept in memory per timeframe and side. Only the nearest ones are drawn, see Zone Filters.')
 int typ_len = input.int(20, 'Typical Body Lookback', minval=5, group=poi_group, tooltip='Number of candles used to measure the typical candle body (the median, so a few crash candles do not distort it). Every size rule below is a multiple of this typical body, so the script scales itself to any market and timeframe.')
@@ -24,31 +47,37 @@ bool corr_only = input.bool(false, 'Hide Higher Timeframe Zones Without Correlat
 int show_n = input.int(3, 'Show Nearest Zones Per Side', minval=1, maxval=20, group=filt_group, tooltip='Per timeframe: draw only this many supply zones above price and demand zones below price. The rest stay in memory and appear when price moves toward them.')
 
 string tf_group = 'Timeframes'
-bool show_d = input.bool(true, 'Daily zones', group=tf_group)
-bool show_w = input.bool(true, 'Weekly zones', group=tf_group)
-bool show_m = input.bool(true, 'Monthly zones', group=tf_group)
+bool show_d = input.bool(true, 'Low timeframe zones (entry)', group=tf_group)
+bool show_w = input.bool(true, 'Mid timeframe zones (trend)', group=tf_group)
+bool show_m = input.bool(true, 'High timeframe zones (range)', group=tf_group)
 bool highlight_nearest = input.bool(true, 'Outline Nearest Zones In White', group=tf_group, tooltip='On the chart timeframe, the closest supply above price and the closest demand below price get a white border and a TARGET label. Higher timeframe frames are never tagged as targets.')
 
+string scan_group = 'Scanner'
+int alert_min = input.int(14, 'Valid Setup Score', minval=0, maxval=20, group=scan_group, tooltip='A target zone whose automatic score reaches this is a valid setup on the board. The alert payload carries every score, so the board can show the rest too.')
+bool alerts_on = input.bool(true, 'Send Setup Alerts', group=scan_group, tooltip='Fires alert() on every bar close with both target zones and their scores as JSON. Create one alert per symbol: condition Jay S&D, Any alert() function call, Once per bar close, with the webhook URL from the Zone Scorecard site. A 1H chart gives an hourly scan.')
+bool show_score = input.bool(true, 'Show Score In Target Label', group=scan_group, tooltip='Adds a SCORE line to each target label with the indicator\'s own point estimate for every check.')
 string visual_group = 'Visual Settings'
-color sup_d_col = input.color(#FF6B6B, 'Daily Supply / Demand', group=visual_group, inline='sd')
-color sup_w_col = input.color(#E03131, 'Weekly Supply / Demand', group=visual_group, inline='sw')
-color sup_m_col = input.color(#8B0000, 'Monthly Supply / Demand', group=visual_group, inline='sm')
-color dem_d_col = input.color(#69DB7C, '', group=visual_group, inline='sd', tooltip='Daily supply and Daily demand colors.')
-color dem_w_col = input.color(#089981, '', group=visual_group, inline='sw', tooltip='Weekly supply and Weekly demand colors.')
-color dem_m_col = input.color(#004D40, '', group=visual_group, inline='sm', tooltip='Monthly supply and Monthly demand colors.')
-int transp_d = input.int(78, 'Daily Fill Transparency', minval=0, maxval=100, group=visual_group)
-int transp_w = input.int(70, 'Weekly Fill Transparency', minval=0, maxval=100, group=visual_group)
-int transp_m = input.int(60, 'Monthly Fill Transparency', minval=0, maxval=100, group=visual_group)
-int width_d = input.int(30, 'Daily Zone Width (bars)', minval=2, group=visual_group, tooltip='How many chart bars wide each zone is drawn, measured back from the last candle. Daily shortest, Weekly longer, Monthly longest, so a stack of zones shows its correlation by size.')
-int width_w = input.int(60, 'Weekly Zone Width (bars)', minval=2, group=visual_group)
-int width_m = input.int(90, 'Monthly Zone Width (bars)', minval=2, group=visual_group)
+color sup_d_col = input.color(#FF6B6B, 'Low TF Supply / Demand', group=visual_group, inline='sd')
+color sup_w_col = input.color(#E03131, 'Mid TF Supply / Demand', group=visual_group, inline='sw')
+color sup_m_col = input.color(#8B0000, 'High TF Supply / Demand', group=visual_group, inline='sm')
+color dem_d_col = input.color(#69DB7C, '', group=visual_group, inline='sd', tooltip='Low timeframe supply and demand colors.')
+color dem_w_col = input.color(#089981, '', group=visual_group, inline='sw', tooltip='Mid timeframe supply and demand colors.')
+color dem_m_col = input.color(#004D40, '', group=visual_group, inline='sm', tooltip='High timeframe supply and demand colors.')
+int transp_d = input.int(78, 'Low TF Fill Transparency', minval=0, maxval=100, group=visual_group)
+int transp_w = input.int(70, 'Mid TF Fill Transparency', minval=0, maxval=100, group=visual_group)
+int transp_m = input.int(60, 'High TF Fill Transparency', minval=0, maxval=100, group=visual_group)
+int width_d = input.int(30, 'Low TF Zone Width (bars)', minval=2, group=visual_group, tooltip='How many chart bars wide each zone is drawn, measured back from the last candle. Daily shortest, Weekly longer, Monthly longest, so a stack of zones shows its correlation by size.')
+int width_w = input.int(60, 'Mid TF Zone Width (bars)', minval=2, group=visual_group)
+int width_m = input.int(90, 'High TF Zone Width (bars)', minval=2, group=visual_group)
 bool anchor_base = input.bool(false, 'Anchor Zones To Their Base Candle', group=visual_group, tooltip='On: each zone starts at the base candle it was built from, like the original drawing. Off: zones use the widths above and end at the right margin.')
 color highlight_color = input.color(color.white, 'Nearest Zone Outline', group=visual_group)
 int target_tr = input.int(40, 'Target Zone Fill Transparency', minval=0, maxval=100, group=visual_group, tooltip='The two target zones (white outline) use this fill transparency instead of their timeframe value, so they stand out boldly.')
 color label_color = input.color(color.white, 'Text Color', group=visual_group)
 bool show_zigzag = input.bool(true, 'Show Zig Zag (chart timeframe)', group=visual_group)
 bool show_trend = input.bool(true, 'Show Trend Readout', group=visual_group, tooltip='A box in the top right corner with the trend state of the Trend Timeframe and of the chart timeframe, read from the zig zag swings with the 3 segment rule: higher highs and higher lows is UP, lower highs and lower lows is DOWN, anything else is RANGE. The control point is the last higher low (up) or lower high (down); a close through it ends the trend.')
-string trend_tf = input.timeframe('W', 'Trend Timeframe', group=visual_group, tooltip='The timeframe whose trend is scored, normally one above the entry timeframe.')
+bool trend_auto = input.bool(true, 'Trend Readout Uses The Mid Timeframe', group=visual_group, tooltip='On: the readout scores the trend of the style\'s Mid timeframe. Off: it uses the Trend Timeframe below.')
+string trend_tf_in = input.timeframe('W', 'Trend Timeframe (when not automatic)', group=visual_group)
+string trend_tf = trend_auto ? TF1 : trend_tf_in
 bool show_labels = input.bool(false, 'Show Swing Labels (chart timeframe)', group=visual_group)
 color zigzag_color = input.color(color.gray, 'ZigZag Color', group=visual_group)
 bool label_targets_only = input.bool(true, 'Label Only The Target Zones', group=visual_group, tooltip='Only the white outlined zones (the nearest on each side) get a label: timeframe, side, price range and the word TARGET, placed in the margin right of the last candle. Other boxes stay unlabeled. Turn off to also print timeframe and side inside every box.')
@@ -65,6 +94,7 @@ type Zone
     bool os = false       // oppositional structure: the move out of the zone, before any retest, closed through an opposing zone of the same timeframe
     int lt = 0            // time of the base's first candle
     bool via_lower = false // zone drawn from the base seen one timeframe below, inside a higher timeframe turn with no clean base
+    float ext = na        // furthest price the move out reached before the first retest
 
 // slot 0 = Daily, 1 = Weekly, 2 = Monthly
 var array<Zone> sup_d = array.new<Zone>()
@@ -75,6 +105,13 @@ var array<Zone> sup_m = array.new<Zone>()
 var array<Zone> dem_m = array.new<Zone>()
 var array<box> broken_zones = array.new<box>()
 var array<label> tgt_labels = array.new<label>()   // right-margin labels for the target zones, rebuilt on every refresh
+// the two target zones picked on the last bar, labeled and scored after the trend readout is known
+var Zone tgt_sup = na
+var Zone tgt_dem = na
+var string tgt_sup_tag = ""
+var string tgt_dem_tag = ""
+var int tgt_sup_slot = 0
+var int tgt_dem_slot = 0
 // record of zone breaks: bar time and key (slot * 2 + side), so a new zone can tell whether its move out broke an opposing zone
 var array<int> brk_t = array.new<int>()
 var array<int> brk_k = array.new<int>()
@@ -95,9 +132,9 @@ f_mode(string tf) =>
     int sec = timeframe.in_seconds(tf)
     sec == chart_sec ? 0 : sec > chart_sec ? 1 : 2
 
-int mode_d = f_mode("D")
-int mode_w = f_mode("W")
-int mode_m = f_mode("M")
+int mode_d = f_mode(TF0)
+int mode_w = f_mode(TF1)
+int mode_m = f_mode(TF2)
 
 //-----------------------------------------------------------------------------
 // BASE DETECTION (runs inside each timeframe's own context)
@@ -214,11 +251,11 @@ tf_pack() =>
 // Daily zones on a Weekly chart) use request.security_lower_tf. A slot that does
 // not apply just requests the chart timeframe and is ignored later.
 //-----------------------------------------------------------------------------
-string tf_d_hi = mode_d == 1 ? "D" : timeframe.period
-string tf_w_hi = mode_w == 1 ? "W" : timeframe.period
-string tf_m_hi = mode_m == 1 ? "M" : timeframe.period
-string tf_d_lo = mode_d == 2 ? "D" : timeframe.period
-string tf_w_lo = mode_w == 2 ? "W" : timeframe.period
+string tf_d_hi = mode_d == 1 ? TF0 : timeframe.period
+string tf_w_hi = mode_w == 1 ? TF1 : timeframe.period
+string tf_m_hi = mode_m == 1 ? TF2 : timeframe.period
+string tf_d_lo = mode_d == 2 ? TF0 : timeframe.period
+string tf_w_lo = mode_w == 2 ? TF1 : timeframe.period
 
 [d_sf, d_st, d_sb, d_stm, d_sn, d_si, d_df, d_dt, d_db, d_dtm, d_dn, d_di, d_c, d_h, d_l, d_a, d_stn, d_st0, d_st1, d_stx, d_dtn, d_dt0, d_dt1, d_dtx] = request.security(syminfo.tickerid, tf_d_hi, tf_pack())
 [w_sf, w_st, w_sb, w_stm, w_sn, w_si, w_df, w_dt, w_db, w_dtm, w_dn, w_di, w_c, w_h, w_l, w_a, w_stn, w_st0, w_st1, w_stx, w_dtn, w_dt0, w_dt1, w_dtx] = request.security(syminfo.tickerid, tf_w_hi, tf_pack())
@@ -233,7 +270,7 @@ string tf_w_lo = mode_w == 2 ? "W" : timeframe.period
 zone_style(int slot) =>
     int w = slot == 2 ? 2 : 1
     int tr = slot == 2 ? transp_m : slot == 1 ? transp_w : transp_d
-    string nm = slot == 2 ? "MONTHLY" : slot == 1 ? "WEEKLY" : "DAILY"
+    string nm = tf_name(slot == 2 ? TF2 : slot == 1 ? TF1 : TF0)
     [w, tr, nm]
 
 zone_color(int slot, bool is_supply) =>
@@ -262,28 +299,28 @@ backing(int slot, bool is_supply, box b) =>
     if slot < 1 and show_w
         if (is_supply ? sup_w : dem_w).any_overlap(top, btm)
             cnt += 1
-            tag := tag + " +W"
+            tag := tag + " +" + tf_tag(TF1)
     if slot < 2 and show_m
         if (is_supply ? sup_m : dem_m).any_overlap(top, btm)
             cnt += 1
-            tag := tag + " +M"
+            tag := tag + " +" + tf_tag(TF2)
     [cnt, tag]
 
 // Label text: timeframe, side, price range, TARGET, higher timeframe backing, then the facts the scorer needs:
 // base candle count, retest count with the deepest retest as a share of the zone, and oppositional structure.
-zone_text(int slot, bool is_supply, Zone z, string tag) =>
+zone_text(int slot, bool is_supply, Zone z, string tag, string extra) =>
     [w, tr, nm] = zone_style(slot)
     box b = z.b
     // three short lines keep the label narrow enough to clear the price axis
-    string facts = "base " + str.tostring(z.base_n) + " | touches " + str.tostring(z.touches) + (z.touches > 0 ? " (" + str.tostring(math.round(z.depth * 100)) + "% deep)" : "") + " | OS " + (z.os ? "yes" : "no") + (z.via_lower ? " | base read on " + (slot == 2 ? "WEEKLY" : "DAILY") : "")
-    nm + (is_supply ? " SUPPLY" : " DEMAND") + " " + str.tostring(b.get_bottom(), format.mintick) + " - " + str.tostring(b.get_top(), format.mintick) + "\nTARGET" + tag + "\n" + facts
+    string facts = "base " + str.tostring(z.base_n) + " | touches " + str.tostring(z.touches) + (z.touches > 0 ? " (" + str.tostring(math.round(z.depth * 100)) + "% deep)" : "") + " | OS " + (z.os ? "yes" : "no") + (z.via_lower ? " | base read on " + tf_name(slot == 2 ? TF1 : TF0) : "")
+    nm + (is_supply ? " SUPPLY" : " DEMAND") + " " + str.tostring(b.get_bottom(), format.mintick) + " - " + str.tostring(b.get_top(), format.mintick) + "\nTARGET" + tag + "\n" + facts + (extra != "" ? "\n" + extra : "")
 
 // Puts the target label in the empty space to the right of the last candle, where no candle can cover it.
-mark_target(int slot, bool is_supply, Zone z, string tag) =>
+mark_target(int slot, bool is_supply, Zone z, string tag, string extra) =>
     box b = z.b
     float mid = (b.get_top() + b.get_bottom()) / 2
     // just outside the box's right end, extending into the right margin
-    label l = label.new(bar_index + 6, mid, zone_text(slot, is_supply, z, tag), xloc=xloc.bar_index, style=label.style_label_left, color=highlight_color, textcolor=color.black, size=size.small)
+    label l = label.new(bar_index + 6, mid, zone_text(slot, is_supply, z, tag, extra), xloc=xloc.bar_index, style=label.style_label_left, color=highlight_color, textcolor=color.black, size=size.small)
     tgt_labels.push(l)
 
 method trim(array<Zone> zones, int limit) =>
@@ -375,6 +412,8 @@ monitor(array<Zone> zones, bool is_supply, int slot, float c, float h, float l) 
                 continue
             bool touching = is_supply ? h >= b.get_bottom() : l <= b.get_top()
             bool closed_out = is_supply ? c < b.get_bottom() : c > b.get_top()
+            if z.touches == 0
+                z.ext := is_supply ? (na(z.ext) ? l : math.min(z.ext, l)) : (na(z.ext) ? h : math.max(z.ext, h))
             if touching and not z.inside
                 z.touches += 1
             if touching
@@ -434,7 +473,7 @@ resolve_turns(int slot, bool is_supply, array<Zone> zones, float yard_h) =>
     if slot > 0 and pt_key.size() > 0
         int key = slot * 2 + (is_supply ? 0 : 1)
         array<Zone> lower = slot == 2 ? (is_supply ? sup_w : dem_w) : (is_supply ? sup_d : dem_d)
-        int life = (slot == 2 ? timeframe.in_seconds("M") : timeframe.in_seconds("W")) * 1000 * 12
+        int life = timeframe.in_seconds(slot == 2 ? TF2 : TF1) * 1000 * 12
         for i = pt_key.size() - 1 to 0
             if pt_key.get(i) == key
                 int t0 = pt_t0.get(i)
@@ -558,7 +597,14 @@ refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<bo
             if is_target
                 b.set_border_color(highlight_color)
                 b.set_border_width(3)
-                mark_target(slot, is_supply, z, tag)
+                if is_supply
+                    tgt_sup := z
+                    tgt_sup_tag := tag
+                    tgt_sup_slot := slot
+                else
+                    tgt_dem := z
+                    tgt_dem_tag := tag
+                    tgt_dem_slot := slot
             else
                 b.set_border_color(base)
                 b.set_border_width(w)
@@ -586,6 +632,8 @@ if barstate.islast
     dem_m.size_all(2, future_time)
     while tgt_labels.size() > 0
         tgt_labels.pop().delete()
+    tgt_sup := na
+    tgt_dem := na
     // TARGET always marks the nearest Daily zones, on every chart. The Daily zones are where the entry
     // is taken and where trend is scored, so the Weekly and Monthly charts outline the same Daily boxes
     // the Daily chart does. Only when Daily is switched off does the chart timeframe take over.
@@ -689,10 +737,6 @@ trend_pack() =>
         cp := sh1
     [state, cp, sh1, sh2, sl1, sl2]
 
-tf_name(string tf) =>
-    int sec = timeframe.in_seconds(tf)
-    sec == timeframe.in_seconds("D") ? "DAILY" : sec == timeframe.in_seconds("W") ? "WEEKLY" : sec == timeframe.in_seconds("M") ? "MONTHLY" : tf
-
 trend_line(string nm, int st, float cp, float sh1, float sh2, float sl1, float sl2) =>
     string st_s = st == 1 ? "UP" : st == -1 ? "DOWN" : "RANGE (no trend)"
     string cp_s = st == 1 ? " | control point " + str.tostring(cp, format.mintick) + " (a close below ends it)" : st == -1 ? " | control point " + str.tostring(cp, format.mintick) + " (a close above ends it)" : ""
@@ -709,6 +753,103 @@ if barstate.islast and show_trend
         trend_box.cell(0, 1, trend_line(tf_name(timeframe.period), c_st, c_cp, c_sh1, c_sh2, c_sl1, c_sl2), text_color=color.new(color.white, 30), text_size=size.small, text_halign=text.align_left)
     else
         trend_box.cell(0, 1, "", text_size=size.small)
+
+//-----------------------------------------------------------------------------
+// SETUP SCORE AND ALERTS
+// The indicator scores each target zone on the sheet's six checks, 20 points, with an automatic range
+// (100% at the middle of the nearest High timeframe supply, 0% at the middle of the nearest High timeframe demand)
+// and an automatic risk to reward (entry at the zone's near edge, stop at its far edge, target at the other target zone).
+//-----------------------------------------------------------------------------
+nearest_zone_box(array<Zone> zones, bool is_supply) =>
+    box best = na
+    float bd = na
+    if zones.size() > 0
+        for i = 0 to zones.size() - 1
+            box b = zones.get(i).b
+            float d = is_supply ? (b.get_bottom() > close ? b.get_bottom() - close : (b.get_top() >= close ? 0.0 : na)) : (b.get_top() < close ? close - b.get_top() : (b.get_bottom() <= close ? 0.0 : na))
+            if not na(d) and (na(bd) or d < bd)
+                bd := d
+                best := b
+    best
+
+range_levels() =>
+    box s = nearest_zone_box(sup_m, true)
+    box d = nearest_zone_box(dem_m, false)
+    if na(s)
+        s := nearest_zone_box(sup_w, true)
+    if na(d)
+        d := nearest_zone_box(dem_w, false)
+    float top = na(s) ? na : (s.get_top() + s.get_bottom()) / 2
+    float btm = na(d) ? na : (d.get_top() + d.get_bottom()) / 2
+    [top, btm]
+
+// Returns [total, range, time, trend, move, os, purity, rrr, rrr_ratio, move_ratio, range_pos]
+score_zone(Zone z, bool is_supply, float r_top, float r_btm, box opp) =>
+    box b = z.b
+    float top = b.get_top()
+    float btm = b.get_bottom()
+    float mid = (top + btm) / 2
+    float hgt = top - btm
+    int s_range = 0
+    float pos = na
+    if not na(r_top) and not na(r_btm) and r_top > r_btm
+        pos := (mid - r_btm) / (r_top - r_btm)
+        s_range := is_supply ? (pos >= 0.75 ? 2 : pos > 0.25 ? 1 : 0) : (pos <= 0.25 ? 2 : pos < 0.75 ? 1 : 0)
+    int s_time = z.base_n <= 3 ? 2 : z.base_n <= 6 ? 1 : 0
+    // trend on arrival: the Mid readout state, unless price must close through the control point to reach the zone
+    int s_trend = 2
+    if is_supply
+        s_trend := t_st == -1 ? ((na(t_cp) or btm < t_cp) ? 4 : 2) : t_st == 1 ? 0 : 2
+    else
+        s_trend := t_st == 1 ? ((na(t_cp) or top > t_cp) ? 4 : 2) : t_st == -1 ? 0 : 2
+    float ratio = na(z.ext) or hgt <= 0 ? na : (is_supply ? btm - z.ext : z.ext - top) / hgt
+    int s_move = not na(ratio) and ratio >= 2 ? 2 : 0
+    int s_os = z.os ? 2 : 0
+    int s_pur = z.touches == 0 ? 4 : (z.touches == 1 and z.depth < 0.5 ? 2 : 0)
+    float rrr = na
+    if not na(opp) and hgt > 0
+        float entry = is_supply ? btm : top
+        float target = is_supply ? opp.get_top() : opp.get_bottom()
+        float reward = is_supply ? entry - target : target - entry
+        if reward > 0
+            rrr := reward / hgt
+    int s_rrr = na(rrr) ? 0 : rrr >= 5 ? 4 : rrr >= 3 ? 2 : 0
+    int total = s_range + s_time + s_trend + s_move + s_os + s_pur + s_rrr
+    [total, s_range, s_time, s_trend, s_move, s_os, s_pur, s_rrr, rrr, ratio, pos]
+
+score_line(int total, int s_range, int s_time, int s_trend, int s_move, int s_os, int s_pur, int s_rrr, float rrr, float ratio, float pos) =>
+    "SCORE " + str.tostring(total) + "/20 | range " + (na(pos) ? "? (no HTF zones)" : str.tostring(s_range)) + " | time " + str.tostring(s_time) + " | trend " + str.tostring(s_trend) + " | move " + str.tostring(s_move) + (na(ratio) ? "" : " (" + str.tostring(ratio, "#.#") + "x)") + " | OS " + str.tostring(s_os) + " | purity " + str.tostring(s_pur) + " | rrr " + str.tostring(s_rrr) + (na(rrr) ? " (no opposing zone)" : " (" + str.tostring(rrr, "#.#") + ":1)")
+
+num(float x) =>
+    na(x) ? "null" : str.tostring(x, "#.####")
+
+setup_json(Zone z, bool is_supply, int slot, string tag, int total, int s_range, int s_time, int s_trend, int s_move, int s_os, int s_pur, int s_rrr, float rrr, float ratio, float pos) =>
+    box b = z.b
+    [w, tr, nm] = zone_style(slot)
+    '{"side":"' + (is_supply ? "SELL" : "BUY") + '","zone":"' + nm + (is_supply ? " SUPPLY " : " DEMAND ") + str.tostring(b.get_bottom(), format.mintick) + " - " + str.tostring(b.get_top(), format.mintick) + '","top":' + num(b.get_top()) + ',"btm":' + num(b.get_bottom()) + ',"backing":"' + str.trim(tag) + '","base":' + str.tostring(z.base_n) + ',"touches":' + str.tostring(z.touches) + ',"depth":' + num(z.depth) + ',"os":' + (z.os ? "true" : "false") + ',"score":' + str.tostring(total) + ',"checks":{"range":' + str.tostring(s_range) + ',"time":' + str.tostring(s_time) + ',"trend":' + str.tostring(s_trend) + ',"move":' + str.tostring(s_move) + ',"os":' + str.tostring(s_os) + ',"purity":' + str.tostring(s_pur) + ',"rrr":' + str.tostring(s_rrr) + '},"rrr_ratio":' + num(rrr) + ',"move_ratio":' + num(ratio) + ',"range_pos":' + num(pos) + '}'
+
+if barstate.islast
+    [r_top, r_btm] = range_levels()
+    string s_json = ""
+    string d_json = ""
+    if not na(tgt_sup)
+        box opp = na
+        if not na(tgt_dem)
+            opp := tgt_dem.b
+        [tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp] = score_zone(tgt_sup, true, r_top, r_btm, opp)
+        mark_target(tgt_sup_slot, true, tgt_sup, tgt_sup_tag, show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp) : "")
+        s_json := setup_json(tgt_sup, true, tgt_sup_slot, tgt_sup_tag, tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp)
+    if not na(tgt_dem)
+        box opp = na
+        if not na(tgt_sup)
+            opp := tgt_sup.b
+        [tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp] = score_zone(tgt_dem, false, r_top, r_btm, opp)
+        mark_target(tgt_dem_slot, false, tgt_dem, tgt_dem_tag, show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp) : "")
+        d_json := setup_json(tgt_dem, false, tgt_dem_slot, tgt_dem_tag, tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp)
+    if alerts_on and barstate.isconfirmed and (s_json != "" or d_json != "")
+        string trend_s = t_st == 1 ? "UP" : t_st == -1 ? "DOWN" : "RANGE"
+        string msg = '{"symbol":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","chart_tf":"' + timeframe.period + '","style":"' + style + '","low_tf":"' + tf_name(TF0) + '","mid_tf":"' + tf_name(TF1) + '","high_tf":"' + tf_name(TF2) + '","price":' + num(close) + ',"bar_time":' + str.tostring(time) + ',"trend":"' + trend_s + '","control_point":' + num(t_cp) + ',"range_top":' + num(r_top) + ',"range_btm":' + num(r_btm) + ',"alert_min":' + str.tostring(alert_min) + ',"setups":[' + s_json + (s_json != "" and d_json != "" ? "," : "") + d_json + ']}'
+        alert(msg, alert.freq_once_per_bar_close)
 
 //-----------------------------------------------------------------------------
 // ZIG ZAG AND SWING LABELS (chart timeframe only)

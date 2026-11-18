@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Setups board | Zone Scorecard</title>
+<meta name="description" content="Live supply and demand setups found by the Jay S&D indicator, scored on the six checks.">
+<meta name="theme-color" content="#E9EDEF">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=Instrument+Serif&display=swap" rel="stylesheet">
+<style>
+:root { --paper:#E9EDEF; --surface:#F7F9F9; --ink:#101923; --slate:#52616D; --rule:#C3CCD2; --pass:#0B7A6B; --pass-soft:#D3EBE6; --fail:#B02A44; --fail-soft:#F3D9DE; --focus:#1F4FD8; --serif:"Instrument Serif",Georgia,serif; --sans:"Hanken Grotesk",system-ui,sans-serif; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--paper); color:var(--ink); font:400 16px/1.5 var(--sans); padding:0 0 80px; }
+a { color: var(--focus); }
+.wrap { max-width: 1100px; margin: 0 auto; padding: 28px 20px; }
+.mark { font-weight:600; letter-spacing:.04em; text-transform:uppercase; font-size:12px; color:var(--slate); }
+h1 { font: 400 44px/1.05 var(--serif); margin: 6px 0 8px; }
+h2 { font: 400 26px/1.1 var(--serif); margin: 0 0 10px; }
+p { margin: 0 0 10px; }
+.hint { color: var(--slate); font-size: 14px; }
+.bar { display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin: 18px 0 14px; }
+.chip { display:inline-block; border:1px solid var(--rule); border-radius:999px; padding:2px 10px; font-size:13px; background:var(--surface); }
+.chip.pass { background: var(--pass-soft); border-color: var(--pass); color: var(--pass); }
+.chip.fail { background: var(--fail-soft); border-color: var(--fail); color: var(--fail); }
+table { width:100%; border-collapse: collapse; background: var(--surface); border:1px solid var(--rule); }
+th, td { text-align:left; padding:10px 12px; border-bottom:1px solid var(--rule); vertical-align: top; font-size: 14px; }
+th { font-weight:600; color:var(--slate); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+tr.valid td { background: #EAF5F2; }
+.score { font: 400 30px/1 var(--serif); }
+.score small { font-size: 14px; color: var(--slate); }
+.checks { display:flex; flex-wrap:wrap; gap:4px; }
+.checks span { font-size:12px; border:1px solid var(--rule); border-radius:6px; padding:1px 6px; background:#fff; }
+.checks span.full { border-color: var(--pass); color: var(--pass); }
+.checks span.zero { border-color: var(--fail); color: var(--fail); }
+.side-BUY { color: var(--pass); font-weight:600; }
+.side-SELL { color: var(--fail); font-weight:600; }
+.box { background: var(--surface); border:1px solid var(--rule); padding:16px 18px; margin: 16px 0; }
+code { background:#fff; border:1px solid var(--rule); padding:1px 5px; border-radius:4px; font-size: 13px; word-break: break-all; }
+ol { padding-left: 20px; margin: 6px 0; }
+li { margin: 4px 0; }
+.muted { color: var(--slate); }
+@media (max-width: 720px) { th:nth-child(6), td:nth-child(6), th:nth-child(7), td:nth-child(7) { display:none; } h1 { font-size: 34px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="mark"><a href="/" style="color:inherit;text-decoration:none">Zone Scorecard</a> / Setups board</div>
+  <h1>What the indicator is watching.</h1>
+  <p class="hint">Every symbol with a Jay S&amp;D alert reports its two target zones on each bar close, scored on the six checks. A setup is valid at the score you set in the indicator (14 by default). Suggestions only. Score it on the sheet and wait for the retest.</p>
+
+  <div class="bar">
+    <span class="chip" id="count">Loading</span>
+    <span class="chip" id="updated"></span>
+    <label class="chip"><input type="checkbox" id="onlyValid"> Valid only</label>
+    <button class="chip" id="refresh" type="button">Refresh</button>
+  </div>
+
+  <div id="board"></div>
+
+  <div class="box" id="howto">
+    <h2>Connect a symbol</h2>
+    <ol>
+      <li>Open the symbol on a <b>1H chart</b> with Jay S&amp;D on it. The indicator scores the Low timeframe targets of your style regardless of the chart timeframe, and a 1H chart makes the alert run every hour.</li>
+      <li>Create an alert: Condition <b>Jay S&amp;D</b>, then <b>Any alert() function call</b>. Options: <b>Once per bar close</b>. Expiration: open ended.</li>
+      <li>Notifications: tick <b>Webhook URL</b> and paste <code id="hook">https://zone-scorecard.vercel.app/api/setup-alert?key=YOUR_SCAN_SECRET</code>. Leave the message as it is.</li>
+      <li>Repeat for each symbol in your watchlist. One alert per symbol.</li>
+    </ol>
+    <p class="hint">The key is the SCAN_SECRET value set in Vercel. The board stores only the latest report per symbol and side, plus a short history.</p>
+  </div>
+</div>
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var MAX = { range: 2, time: 2, trend: 4, move: 2, os: 2, purity: 4, rrr: 4 };
+  var LABEL = { range: "Range", time: "Time", trend: "Trend", move: "Move", os: "OS", purity: "Purity", rrr: "RRR" };
+  function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
+  function ago(ms) { var s = Math.max(0, Math.round((Date.now() - ms) / 1000)); if (s < 90) return s + "s ago"; var m = Math.round(s / 60); if (m < 90) return m + " min ago"; var h = Math.round(m / 60); if (h < 36) return h + " h ago"; return Math.round(h / 24) + " d ago"; }
+  function row(s) {
+    var checks = Object.keys(MAX).map(function (k) {
+      var v = s.checks && typeof s.checks[k] === "number" ? s.checks[k] : 0;
+      var cls = v === MAX[k] ? "full" : v === 0 ? "zero" : "";
+      return '<span class="' + cls + '">' + LABEL[k] + " " + v + "/" + MAX[k] + "</span>";
+    }).join("");
+    var extra = [];
+    if (s.backing) extra.push(esc(s.backing));
+    if (typeof s.rrr_ratio === "number") extra.push("RR " + s.rrr_ratio.toFixed(1) + ":1");
+    if (typeof s.move_ratio === "number") extra.push("move " + s.move_ratio.toFixed(1) + "x");
+    if (typeof s.base === "number") extra.push("base " + s.base);
+    if (typeof s.touches === "number") extra.push("touches " + s.touches);
+    return '<tr class="' + (s.valid ? "valid" : "") + '">' +
+      "<td><b>" + esc(s.symbol) + "</b><br><span class='muted'>" + esc(s.exchange || "") + (s.price ? " · " + s.price : "") + "</span></td>" +
+      '<td class="side-' + esc(s.side) + '">' + esc(s.side) + "</td>" +
+      "<td>" + esc(s.zone || "") + "<br><span class='muted'>" + extra.join(" · ") + "</span></td>" +
+      '<td><span class="score">' + s.score + "<small>/20</small></span>" + (s.valid ? '<br><span class="chip pass">valid</span>' : "") + "</td>" +
+      '<td><div class="checks">' + checks + "</div></td>" +
+      "<td>" + esc(s.mid_tf || "Mid") + " " + esc(s.trend || "") + (typeof s.control_point === "number" ? "<br><span class='muted'>cp " + s.control_point + "</span>" : "") + "</td>" +
+      "<td class='muted'>" + ago(s.at) + "</td></tr>";
+  }
+  function render(data) {
+    var list = data.setups || [];
+    if ($("onlyValid").checked) list = list.filter(function (s) { return s.valid; });
+    var valid = (data.setups || []).filter(function (s) { return s.valid; }).length;
+    $("count").textContent = (data.setups || []).length + " targets, " + valid + " valid";
+    $("count").className = "chip " + (valid ? "pass" : "");
+    $("updated").textContent = "Checked " + new Date(data.now).toLocaleTimeString();
+    if (!data.configured) {
+      $("board").innerHTML = '<div class="box"><b>No store connected yet.</b> Add an Upstash Redis database to the Vercel project (Storage, Create Database, Upstash Redis) and set SCAN_SECRET, then redeploy.</div>';
+      return;
+    }
+    if (!list.length) { $("board").innerHTML = '<div class="box">Nothing reported yet. Connect a symbol below and wait for the next bar close.</div>'; return; }
+    $("board").innerHTML = "<table><thead><tr><th>Symbol</th><th>Side</th><th>Target zone</th><th>Score</th><th>Checks</th><th>Mid trend</th><th>Updated</th></tr></thead><tbody>" + list.map(row).join("") + "</tbody></table>";
+  }
+  function load() {
+    fetch("/api/setups", { cache: "no-store" }).then(function (r) { return r.json(); }).then(render).catch(function () {
+      $("board").innerHTML = '<div class="box">Could not load the board. Try again in a moment.</div>';
+    });
+  }
+  $("refresh").addEventListener("click", load);
+  $("onlyValid").addEventListener("change", load);
+  $("hook").textContent = location.origin + "/api/setup-alert?key=YOUR_SCAN_SECRET";
+  load();
+  setInterval(load, 60000);
+})();
+</script>
+</body>
+</html>

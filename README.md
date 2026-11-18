@@ -29,3 +29,17 @@ If gh or vercel is not logged in, tell me the exact command to run and wait.
 ## Change the rules later
 
 Scoring lives at the top of the script in `index.html`: the `PASS` score, the `CHECKS` list (questions and points) and the `PRESETS` timeframes. Ask Claude Code to edit those, then push again. Vercel and GitHub Pages redeploy on every push.
+
+## Hourly scanner (Setups board)
+
+The Jay S&D indicator scores its two target zones itself on every bar close and can post the result to this site. The board at `/setups.html` shows the latest report per symbol and side and marks anything at or above the indicator's Valid Setup Score.
+
+One-time setup:
+
+1. **Store.** In the Vercel project open Storage, Create Database, pick Upstash Redis and connect it to the project. That adds `KV_REST_API_URL` and `KV_REST_API_TOKEN` automatically.
+2. **Secret.** Pick any long random string and add it as `SCAN_SECRET` with `vercel env add SCAN_SECRET production`. Redeploy once so both take effect.
+3. **Alerts.** For each symbol, on a 1H chart with Jay S&D on it: create an alert, condition Jay S&D then Any alert() function call, Once per bar close, webhook URL `https://zone-scorecard.vercel.app/api/setup-alert?key=SCAN_SECRET`.
+
+Endpoints: `POST /api/setup-alert?key=...` receives the alert JSON; `GET /api/setups` lists the latest reports.
+
+The indicator's Trading Style setting (Position, Swing, Day trader, Scalper, Custom) picks the Low, Mid and High timeframes and matches the presets on the sheet.

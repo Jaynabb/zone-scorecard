@@ -76,6 +76,7 @@ var array<label> tgt_labels = array.new<label>()   // right-margin labels for th
 // record of zone breaks: bar time and key (slot * 2 + side), so a new zone can tell whether its move out broke an opposing zone
 var array<int> brk_t = array.new<int>()
 var array<int> brk_k = array.new<int>()
+var array<int> brk_lt = array.new<int>()   // base time of the zone that broke
 // keys of bases already turned into zones (left_time * 8 + slot * 2 + side), so a repeated report is not drawn twice
 var array<int> seen_keys = array.new<int>()
 
@@ -285,7 +286,7 @@ broke_opposing(int slot, bool is_supply, int left_time, int imp_t) =>
     if brk_t.size() > 0 and not na(left_time)
         int hi = na(imp_t) ? time : imp_t
         for i = 0 to brk_t.size() - 1
-            if brk_k.get(i) == key and brk_t.get(i) >= left_time - slack and brk_t.get(i) <= hi + slack
+            if brk_k.get(i) == key and brk_lt.get(i) < left_time and brk_t.get(i) >= left_time - slack and brk_t.get(i) <= hi + slack
                 hit := true
                 break
     hit
@@ -338,9 +339,11 @@ monitor(array<Zone> zones, bool is_supply, int slot, float c, float h, float l) 
                     broken_zones.pop().delete()
                 brk_t.unshift(time)
                 brk_k.unshift(slot * 2 + (is_supply ? 0 : 1))
+                brk_lt.unshift(z.lt)
                 if brk_t.size() > 300
                     brk_t.pop()
                     brk_k.pop()
+                    brk_lt.pop()
                 b.delete()
                 zones.remove(i)
                 continue
@@ -368,7 +371,8 @@ add_once(array<Zone> zones, bool is_supply, int slot, bool found, float top, flo
             create_zone(zones, is_supply, top, btm, lt, slot, atr_tf, n, imp_t)
 
 // Oppositional structure covers the whole directional move out of the zone, not just the impulse candle:
-// until the zone's first retest, any close through an opposing zone of the same timeframe since the base sets the flag.
+// until the zone's first retest, any close through an opposing zone of the same timeframe that already existed
+// to the left of the base sets the flag. Zones born during the move itself do not count.
 method update_os(array<Zone> zones, bool is_supply, int slot) =>
     if zones.size() > 0 and brk_t.size() > 0
         int key = slot * 2 + (is_supply ? 1 : 0)
@@ -380,7 +384,7 @@ method update_os(array<Zone> zones, bool is_supply, int slot) =>
                     int bt = brk_t.get(j)
                     if bt < z.lt - slack
                         break
-                    if brk_k.get(j) == key
+                    if brk_k.get(j) == key and brk_lt.get(j) < z.lt
                         z.os := true
                         break
 
@@ -607,7 +611,8 @@ trend_pack() =>
     [state, cp, sh1, sh2, sl1, sl2]
 
 tf_name(string tf) =>
-    tf == "D" ? "DAILY" : tf == "W" ? "WEEKLY" : tf == "M" ? "MONTHLY" : tf
+    int sec = timeframe.in_seconds(tf)
+    sec == timeframe.in_seconds("D") ? "DAILY" : sec == timeframe.in_seconds("W") ? "WEEKLY" : sec == timeframe.in_seconds("M") ? "MONTHLY" : tf
 
 trend_line(string nm, int st, float cp, float sh1, float sh2, float sl1, float sl2) =>
     string st_s = st == 1 ? "UP" : st == -1 ? "DOWN" : "RANGE (no trend)"
@@ -621,7 +626,7 @@ trend_line(string nm, int st, float cp, float sh1, float sh2, float sl1, float s
 var table trend_box = table.new(position.top_right, 1, 2, bgcolor=color.new(color.black, 25), border_width=1, border_color=color.new(color.white, 60))
 if barstate.islast and show_trend
     trend_box.cell(0, 0, trend_line(tf_name(trend_tf), t_st, t_cp, t_sh1, t_sh2, t_sl1, t_sl2), text_color=color.white, text_size=size.small, text_halign=text.align_left)
-    if trend_tf != timeframe.period
+    if timeframe.in_seconds(trend_tf) != chart_sec
         trend_box.cell(0, 1, trend_line(tf_name(timeframe.period), c_st, c_cp, c_sh1, c_sh2, c_sl1, c_sl2), text_color=color.new(color.white, 30), text_size=size.small, text_halign=text.align_left)
     else
         trend_box.cell(0, 1, "", text_size=size.small)

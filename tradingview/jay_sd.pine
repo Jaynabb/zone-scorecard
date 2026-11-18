@@ -435,12 +435,13 @@ if barstate.islast
     dem_m.size_all(2, future_time)
     while tgt_labels.size() > 0
         tgt_labels.pop().delete()
-    // TARGET applies only to the chart timeframe, where the entry is taken
-    bool hl_d = highlight_nearest and show_d and mode_d == 0
-    bool hl_w = highlight_nearest and show_w and mode_w == 0
-    bool hl_m = highlight_nearest and show_m and mode_m == 0
-    // the anchor is the timeframe that matches the chart; below Daily, Daily is the anchor
-    int anchor_slot = mode_d == 0 ? 0 : mode_w == 0 ? 1 : mode_m == 0 ? 2 : 0
+    // TARGET always marks the nearest Daily zones, on every chart. The Daily zones are where the entry
+    // is taken and where trend is scored, so the Weekly and Monthly charts outline the same Daily boxes
+    // the Daily chart does. Only when Daily is switched off does the chart timeframe take over.
+    bool hl_d = highlight_nearest and show_d
+    bool hl_w = highlight_nearest and not show_d and show_w and mode_w == 0
+    bool hl_m = highlight_nearest and not show_d and show_m and mode_m == 0
+    int anchor_slot = show_d ? 0 : mode_w == 0 ? 1 : mode_m == 0 ? 2 : 0
     array<box> a_s = array.new<box>()
     array<box> a_d = array.new<box>()
     if anchor_slot == 0
@@ -452,15 +453,11 @@ if barstate.islast
     else
         a_s := refresh(sup_m, true, 2, hl_m, a_s, false)
         a_d := refresh(dem_m, false, 2, hl_m, a_d, false)
-    // Timeframes below the chart are never drawn: entries are taken on the chart timeframe, not inside it.
-    // Timeframes above the chart follow the correlation rule.
+    // Daily is always drawn (it is the anchor unless switched off). Weekly below a Monthly chart is never
+    // drawn. Every other non-anchor timeframe follows the correlation rule.
     if anchor_slot != 0
-        if mode_d == 2
-            sup_d.hide_all(true, 0)
-            dem_d.hide_all(false, 0)
-        else
-            refresh(sup_d, true, 0, hl_d, a_s, corr_only)
-            refresh(dem_d, false, 0, hl_d, a_d, corr_only)
+        refresh(sup_d, true, 0, hl_d, a_s, corr_only)
+        refresh(dem_d, false, 0, hl_d, a_d, corr_only)
     if anchor_slot != 1
         if mode_w == 2
             sup_w.hide_all(true, 1)

@@ -46,6 +46,8 @@ color highlight_color = input.color(color.white, 'Nearest Zone Outline', group=v
 int target_tr = input.int(40, 'Target Zone Fill Transparency', minval=0, maxval=100, group=visual_group, tooltip='The two target zones (white outline) use this fill transparency instead of their timeframe value, so they stand out boldly.')
 color label_color = input.color(color.white, 'Text Color', group=visual_group)
 bool show_zigzag = input.bool(true, 'Show Zig Zag (chart timeframe)', group=visual_group)
+bool show_trend = input.bool(true, 'Show Trend Readout', group=visual_group, tooltip='A box in the top right corner with the trend state of the Trend Timeframe and of the chart timeframe, read from the zig zag swings with the 3 segment rule: higher highs and higher lows is UP, lower highs and lower lows is DOWN, anything else is RANGE. The control point is the last higher low (up) or lower high (down); a close through it ends the trend.')
+string trend_tf = input.timeframe('W', 'Trend Timeframe', group=visual_group, tooltip='The timeframe whose trend is scored, normally one above the entry timeframe.')
 bool show_labels = input.bool(false, 'Show Swing Labels (chart timeframe)', group=visual_group)
 color zigzag_color = input.color(color.gray, 'ZigZag Color', group=visual_group)
 bool label_targets_only = input.bool(true, 'Label Only The Target Zones', group=visual_group, tooltip='Only the white outlined zones (the nearest on each side) get a label: timeframe, side, price range and the word TARGET, placed in the margin right of the last candle. Other boxes stay unlabeled. Turn off to also print timeframe and side inside every box.')
@@ -534,6 +536,95 @@ if barstate.islast
     if anchor_slot != 2
         refresh(sup_m, true, 2, false, a_s, corr_only)
         refresh(dem_m, false, 2, false, a_d, corr_only)
+
+//-----------------------------------------------------------------------------
+// TREND STATE
+// The same alternating swings the zig zag draws, scored with the 3 segment rule on closes.
+// Returns [state, control point, last high, previous high, last low, previous low]; state 1 up, -1 down, 0 range.
+//-----------------------------------------------------------------------------
+trend_pack() =>
+    var bool up = false
+    var float sh1 = na
+    var float sh2 = na
+    var float sl1 = na
+    var float sl2 = na
+    var float last = na
+    var int state = 0
+    var float cp = na
+    float ph = ta.pivothigh(high, zz_len, zz_len)
+    float pl = ta.pivotlow(low, zz_len, zz_len)
+    bool is_high = not na(ph)
+    bool is_low = not na(pl)
+    bool changed = false
+    if na(last)
+        last := close
+    if up and is_high
+        if ph > last
+            last := ph
+            sh1 := ph
+            changed := true
+    else if up and is_low
+        up := false
+        last := pl
+        sl2 := sl1
+        sl1 := pl
+        changed := true
+    else if not up and is_low
+        if pl < last
+            last := pl
+            sl1 := pl
+            changed := true
+    else if not up and is_high
+        up := true
+        last := ph
+        sh2 := sh1
+        sh1 := ph
+        changed := true
+    if changed and not na(sh2) and not na(sl2)
+        if sh1 > sh2 and sl1 > sl2
+            state := 1
+            cp := sl1
+        else if sh1 < sh2 and sl1 < sl2
+            state := -1
+            cp := sh1
+        else
+            state := 0
+            cp := na
+    // the trend holds until a candle closes through the control point
+    if state == 1 and close < cp
+        state := 0
+        cp := na
+    if state == -1 and close > cp
+        state := 0
+        cp := na
+    // the current leg completes a trend once it has closed past the last swing extreme
+    if state == 0 and not na(sh1) and not na(sl1) and not na(sl2) and close > sh1 and sl1 > sl2
+        state := 1
+        cp := sl1
+    if state == 0 and not na(sl1) and not na(sh1) and not na(sh2) and close < sl1 and sh1 < sh2
+        state := -1
+        cp := sh1
+    [state, cp, sh1, sh2, sl1, sl2]
+
+tf_name(string tf) =>
+    tf == "D" ? "DAILY" : tf == "W" ? "WEEKLY" : tf == "M" ? "MONTHLY" : tf
+
+trend_line(string nm, int st, float cp, float sh1, float sh2, float sl1, float sl2) =>
+    string st_s = st == 1 ? "UP" : st == -1 ? "DOWN" : "RANGE (no trend)"
+    string cp_s = st == 1 ? " | control point " + str.tostring(cp, format.mintick) + " (a close below ends it)" : st == -1 ? " | control point " + str.tostring(cp, format.mintick) + " (a close above ends it)" : ""
+    string piv = (na(sh2) or na(sl2)) ? "" : " | highs " + str.tostring(sh1, format.mintick) + (sh1 > sh2 ? " > " : " < ") + str.tostring(sh2, format.mintick) + " | lows " + str.tostring(sl1, format.mintick) + (sl1 > sl2 ? " > " : " < ") + str.tostring(sl2, format.mintick)
+    nm + " TREND: " + st_s + cp_s + piv
+
+[t_st, t_cp, t_sh1, t_sh2, t_sl1, t_sl2] = request.security(syminfo.tickerid, trend_tf, trend_pack())
+[c_st, c_cp, c_sh1, c_sh2, c_sl1, c_sl2] = trend_pack()
+
+var table trend_box = table.new(position.top_right, 1, 2, bgcolor=color.new(color.black, 25), border_width=1, border_color=color.new(color.white, 60))
+if barstate.islast and show_trend
+    trend_box.cell(0, 0, trend_line(tf_name(trend_tf), t_st, t_cp, t_sh1, t_sh2, t_sl1, t_sl2), text_color=color.white, text_size=size.small, text_halign=text.align_left)
+    if trend_tf != timeframe.period
+        trend_box.cell(0, 1, trend_line(tf_name(timeframe.period), c_st, c_cp, c_sh1, c_sh2, c_sl1, c_sl2), text_color=color.new(color.white, 30), text_size=size.small, text_halign=text.align_left)
+    else
+        trend_box.cell(0, 1, "", text_size=size.small)
 
 //-----------------------------------------------------------------------------
 // ZIG ZAG AND SWING LABELS (chart timeframe only)

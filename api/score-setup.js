@@ -19,8 +19,9 @@ const check = (optionEnum, extra) => ({
 const SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["zone_found", "target_zone", "range", "time", "trend", "strength_move", "strength_structure", "purity", "rrr", "notes"],
+  required: ["direction", "zone_found", "target_zone", "range", "time", "trend", "strength_move", "strength_structure", "purity", "rrr", "notes"],
   properties: {
+    direction: { type: "string", enum: ["BUY", "SELL", "unclear"] },
     zone_found: { type: "boolean" },
     target_zone: { type: "string" },
     range: check(["top_or_bottom", "middle", "opposite", "unclear"]),
@@ -41,10 +42,15 @@ const SCHEMA = {
 function buildPrompt(direction, zone, tf) {
   const low = tf.low || "Low", mid = tf.mid || "Mid", high = tf.high || "High";
   const side = direction === "SELL" ? "SUPPLY" : "DEMAND";
-  const zoneText = zone
-    ? "The trader is going to " + direction + " from the target zone: " + zone + ". "
-    : "The trader is going to " + direction + ". The target zone is the box in Screenshot 2 whose label ends with the word TARGET on the " + side + " side, " +
-      "that is the nearest " + side + " box to price, drawn with a thick white outline. Read its exact price range from its label. ";
+  const dirText = direction === "AUTO"
+    ? "First work out the trade direction from the position tool on Screenshot 2. TradingView's long position tool has its green profit box above the entry line and its red stop box below the entry: that is a BUY. " +
+      "The short position tool has the green profit box below the entry and the red stop box above it: that is a SELL. Set direction to BUY or SELL from that. " +
+      "If there is no position tool on Screenshot 2, set direction to 'unclear', set zone_found to false, and say so in notes. "
+    : "The trader is going to " + direction + ". Set direction to " + direction + ". ";
+  const zoneText = dirText + (zone
+    ? "The target zone is: " + zone + ". "
+    : "The target zone is the box in Screenshot 2 whose label contains the word TARGET on the matching side: the SUPPLY box for a SELL, the DEMAND box for a BUY" +
+      (direction === "AUTO" ? "" : ", here the " + side + " box") + ". It is the nearest box of that side to price, drawn with a thick white outline. Read its exact price range from its label. ");
   return "You are pre-filling a supply and demand zone scorecard for a trader. The trader reviews every answer, so be honest about uncertainty. " +
     "Screenshot 1 is the Mid timeframe (" + mid + "). Screenshot 2 is the Low timeframe (" + low + ") and shows the target zone. " +
     zoneText +
@@ -141,8 +147,11 @@ export default async function handler(req, res) {
   const rrr = pack(p.rrr, MAP.rrr, { ratio: rrrRatio, visible: p.rrr.option !== "not_visible" });
   if (rrrRatio !== null) rrr.index = rrrRatio >= 5 ? 0 : rrrRatio >= 3 ? 1 : 2;
 
+  const dirOut = g.direction === "AUTO" ? (p.direction === "BUY" || p.direction === "SELL" ? p.direction : "") : g.direction;
+
   return send(res, 200, {
-    direction: g.direction,
+    direction: dirOut,
+    direction_source: g.direction === "AUTO" ? "chart" : "user",
     zone_found: Boolean(p.zone_found),
     target_zone: String(p.target_zone || ""),
     checks: {

@@ -104,8 +104,10 @@ export async function gate(req, res) {
   }
   if (JSON.stringify(body).length > MAX_BODY_BYTES) return { error: [413, { error: "Request is too large. Max 4 MB." }] };
 
-  const direction = String(body.direction || "").toUpperCase();
-  if (direction !== "BUY" && direction !== "SELL") return { error: [400, { error: "Pick Buy or Sell." }] };
+  // BUY, SELL, or AUTO (empty counts as AUTO): with AUTO the model reads the direction from the position tool on the Low chart.
+  let direction = String(body.direction || "AUTO").toUpperCase();
+  if (direction === "") direction = "AUTO";
+  if (direction !== "BUY" && direction !== "SELL" && direction !== "AUTO") return { error: [400, { error: "Direction must be Buy, Sell or Auto." }] };
 
   // Optional: when empty, the function falls back to the TARGET tag the Jay S&D indicator puts on the chart.
   const zone = String(body.zone || "").replace(/\s+/g, " ").trim();

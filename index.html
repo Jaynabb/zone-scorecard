@@ -310,11 +310,12 @@ footer { margin-top: 40px; padding: 22px 0 40px; border-top: 1px solid var(--rul
         </section>
         <section class="check" id="aiscore" aria-labelledby="ai-h">
           <div class="check-head"><h2 id="ai-h">Score from screenshots</h2><span class="max">Suggest, then confirm</span></div>
-          <p class="hint">Upload your Mid and Low charts with the Jay S&amp;D zones on. Pick Buy or Sell and the scorer reads the box tagged TARGET on that side. Claude suggests an answer for each check below, with a reason. You confirm or change every one before it counts.</p>
+          <p class="hint">Upload your Mid and Low charts with the Jay S&amp;D zones on. Leave Direction on Auto and the scorer reads Buy or Sell from the position tool on your Low chart, then scores the box tagged TARGET on that side. Claude suggests an answer for each check below, with a reason. You confirm or change every one before it counts.</p>
           <form class="tt-form" id="aiForm" autocomplete="off" novalidate>
             <div class="field">
               <span style="font-weight:600;font-size:15px" id="ai-dir-l">Direction</span>
               <div class="dir" role="radiogroup" aria-labelledby="ai-dir-l">
+                <label class="chip"><input type="radio" name="aidir" value="AUTO" checked><span>Auto from chart</span></label>
                 <label class="chip"><input type="radio" name="aidir" value="BUY"><span>Buy</span></label>
                 <label class="chip"><input type="radio" name="aidir" value="SELL"><span>Sell</span></label>
               </div>
@@ -895,10 +896,9 @@ footer { margin-top: 40px; padding: 22px 0 40px; border-top: 1px solid var(--rul
     return {
       imgs: imgs,
       setStatus: setStatus,
-      dir: function () { var r = document.querySelector('input[name="' + ids.dir + '"]:checked'); return r ? r.value : ""; },
+      dir: function () { var r = document.querySelector('input[name="' + ids.dir + '"]:checked'); return r ? r.value : "AUTO"; },
       zone: function () { return $(ids.zone).value.replace(/\s+/g, " ").trim(); },
       validate: function () {
-        if (!this.dir()) return "Pick Buy or Sell.";
         if (!imgs[0]) return "Add screenshot 1, the Mid timeframe.";
         if (!imgs[1]) return "Add screenshot 2, the Low timeframe with the target zone.";
         return "";
@@ -1009,14 +1009,20 @@ footer { margin-top: 40px; padding: 22px 0 40px; border-top: 1px solid var(--rul
         }
         tagFor(m.id, c);
       });
-      // direction into the log form
-      var dir = data.direction === "BUY" ? "Buy" : "Sell";
-      Array.prototype.forEach.call(document.querySelectorAll('input[name="dir"]'), function (r) { r.checked = r.value === dir; });
+      // direction into the log form (when the model read it from the chart, or the user picked it)
+      if (data.direction === "BUY" || data.direction === "SELL") {
+        var dir = data.direction === "BUY" ? "Buy" : "Sell";
+        Array.prototype.forEach.call(document.querySelectorAll('input[name="dir"]'), function (r) { r.checked = r.value === dir; });
+      }
       var u = update();
       aiLast = { at: Date.now(), checks: data.checks, notes: data.notes || "", model: data.model || "" };
 
       var warn = data.zone_found === false ? '<p style="color:var(--fail);margin-top:6px"><b>The model could not find the target zone.</b> Check that the TARGET box is in the Low screenshot, or describe the zone.</p>' : "";
       var tz = data.target_zone ? '<p style="margin-top:6px">Scored zone: <b>' + esc(data.target_zone) + '</b></p>' : "";
+      if (data.direction_source === "chart") {
+        tz = (data.direction ? '<p style="margin-top:6px">Direction read from your position tool: <b>' + esc(data.direction) + '</b></p>'
+                             : '<p style="color:var(--fail);margin-top:6px"><b>Could not tell Buy or Sell.</b> No position tool was visible on the Low chart. Pick the direction and run again.</p>') + tz;
+      }
       resultEl.className = "tt-result ai-summary " + (unsure ? "partial" : "match");
       resultEl.innerHTML =
         '<div class="tt-verdict"><strong>' + (unsure ? "REVIEW" : "SUGGESTED") + '</strong><span class="ai-pts">' + u.r.total + '/' + MAX + ' so far</span></div>' +

@@ -52,7 +52,7 @@ function buildPrompt(direction, zone, tf) {
     "Timeframe is shown by shade and width: Daily zones are the lightest shade and the shortest boxes, Weekly zones a medium shade and longer, Monthly zones the darkest shade and the longest. " +
     "Where zones of different timeframes overlap, the fills stack and the shorter box sits inside the longer one: that is correlation. " +
     "Only the nearest box on each side of price is labeled: it has a thick white outline and a label with its timeframe, side, price range and the word TARGET, " +
-    "for example DAILY DEMAND 1720.31 - 1743.28 TARGET +W +M | base 3 | touches 1 (40% deep) | OS yes. A suffix +W means a Weekly zone overlaps it and +M means a Monthly zone overlaps it; no suffix means no higher timeframe backing. " +
+    "for example DAILY DEMAND 1720.31 - 1743.28 TARGET +W +M on the first line and base 3 | touches 1 (40% deep) | OS yes on the second line. A suffix +W means a Weekly zone overlaps it and +M means a Monthly zone overlaps it; no suffix means no higher timeframe backing. " +
     "After the backing come three facts measured by the indicator itself, which are exact and override anything you would estimate by eye: 'base N' is the number of base candles the zone was built from; " +
     "'touches N' is how many times price has come back into the zone since it was created, with the deepest retest as a share of the zone height in brackets, and 'touches 0' means never retouched; " +
     "'OS yes' means the move out of the zone closed through an opposing zone of the same timeframe (oppositional structure), 'OS no' means it did not. " +

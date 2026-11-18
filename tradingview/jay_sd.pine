@@ -105,13 +105,11 @@ var array<Zone> sup_m = array.new<Zone>()
 var array<Zone> dem_m = array.new<Zone>()
 var array<box> broken_zones = array.new<box>()
 var array<label> tgt_labels = array.new<label>()   // right-margin labels for the target zones, rebuilt on every refresh
-// the two target zones picked on the last bar, labeled and scored after the trend readout is known
-var Zone tgt_sup = na
-var Zone tgt_dem = na
-var string tgt_sup_tag = ""
-var string tgt_dem_tag = ""
-var int tgt_sup_slot = 0
-var int tgt_dem_slot = 0
+// the target zones picked on the last bar (arrays, because functions may not assign globals), labeled and scored after the trend readout is known
+var array<Zone> tgt_zones = array.new<Zone>()
+var array<bool> tgt_is_sup = array.new<bool>()
+var array<string> tgt_tags = array.new<string>()
+var array<int> tgt_slots = array.new<int>()
 // record of zone breaks: bar time and key (slot * 2 + side), so a new zone can tell whether its move out broke an opposing zone
 var array<int> brk_t = array.new<int>()
 var array<int> brk_k = array.new<int>()
@@ -597,14 +595,10 @@ refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<bo
             if is_target
                 b.set_border_color(highlight_color)
                 b.set_border_width(3)
-                if is_supply
-                    tgt_sup := z
-                    tgt_sup_tag := tag
-                    tgt_sup_slot := slot
-                else
-                    tgt_dem := z
-                    tgt_dem_tag := tag
-                    tgt_dem_slot := slot
+                tgt_zones.push(z)
+                tgt_is_sup.push(is_supply)
+                tgt_tags.push(tag)
+                tgt_slots.push(slot)
             else
                 b.set_border_color(base)
                 b.set_border_width(w)
@@ -632,8 +626,10 @@ if barstate.islast
     dem_m.size_all(2, future_time)
     while tgt_labels.size() > 0
         tgt_labels.pop().delete()
-    tgt_sup := na
-    tgt_dem := na
+    tgt_zones.clear()
+    tgt_is_sup.clear()
+    tgt_tags.clear()
+    tgt_slots.clear()
     // TARGET always marks the nearest Daily zones, on every chart. The Daily zones are where the entry
     // is taken and where trend is scored, so the Weekly and Monthly charts outline the same Daily boxes
     // the Daily chart does. Only when Daily is switched off does the chart timeframe take over.
@@ -829,6 +825,22 @@ setup_json(Zone z, bool is_supply, int slot, string tag, int total, int s_range,
     '{"side":"' + (is_supply ? "SELL" : "BUY") + '","zone":"' + nm + (is_supply ? " SUPPLY " : " DEMAND ") + str.tostring(b.get_bottom(), format.mintick) + " - " + str.tostring(b.get_top(), format.mintick) + '","top":' + num(b.get_top()) + ',"btm":' + num(b.get_bottom()) + ',"backing":"' + str.trim(tag) + '","base":' + str.tostring(z.base_n) + ',"touches":' + str.tostring(z.touches) + ',"depth":' + num(z.depth) + ',"os":' + (z.os ? "true" : "false") + ',"score":' + str.tostring(total) + ',"checks":{"range":' + str.tostring(s_range) + ',"time":' + str.tostring(s_time) + ',"trend":' + str.tostring(s_trend) + ',"move":' + str.tostring(s_move) + ',"os":' + str.tostring(s_os) + ',"purity":' + str.tostring(s_pur) + ',"rrr":' + str.tostring(s_rrr) + '},"rrr_ratio":' + num(rrr) + ',"move_ratio":' + num(ratio) + ',"range_pos":' + num(pos) + '}'
 
 if barstate.islast
+    Zone tgt_sup = na
+    Zone tgt_dem = na
+    string tgt_sup_tag = ""
+    string tgt_dem_tag = ""
+    int tgt_sup_slot = 0
+    int tgt_dem_slot = 0
+    if tgt_zones.size() > 0
+        for i = 0 to tgt_zones.size() - 1
+            if tgt_is_sup.get(i)
+                tgt_sup := tgt_zones.get(i)
+                tgt_sup_tag := tgt_tags.get(i)
+                tgt_sup_slot := tgt_slots.get(i)
+            else
+                tgt_dem := tgt_zones.get(i)
+                tgt_dem_tag := tgt_tags.get(i)
+                tgt_dem_slot := tgt_slots.get(i)
     [r_top, r_btm] = range_levels()
     string s_json = ""
     string d_json = ""

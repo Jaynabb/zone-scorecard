@@ -469,6 +469,7 @@ process_slot(int slot, int mode, bool show, array<Zone> sup, array<Zone> dem, bo
                     monitor(dem, false, slot, l_c.get(i), l_h.get(i), l_l.get(i))
                 sup.update_os(true, slot)
                 dem.update_os(false, slot)
+            0
         else
             add_once(sup, true, slot, h_sf, h_st, h_sb, h_stm, h_sn, h_si, h_a)
             add_once(dem, false, slot, h_df, h_dt, h_db, h_dtm, h_dn, h_di, h_a)
@@ -480,6 +481,7 @@ process_slot(int slot, int mode, bool show, array<Zone> sup, array<Zone> dem, bo
             note_turn(slot, false, h_dtn, h_dt0, h_dt1, h_dtx)
             resolve_turns(slot, true, sup, h_a)
             resolve_turns(slot, false, dem, h_a)
+            0
 
 // Sizes every box: either anchored at its base candle and extended to the right margin, or a fixed
 // width per timeframe measured back from the last candle (Daily shortest, Monthly longest).

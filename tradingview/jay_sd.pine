@@ -255,13 +255,19 @@ string tf_w_hi = mode_w == 1 ? TF1 : timeframe.period
 string tf_m_hi = mode_m == 1 ? TF2 : timeframe.period
 string tf_d_lo = mode_d == 2 ? TF0 : timeframe.period
 string tf_w_lo = mode_w == 2 ? TF1 : timeframe.period
+// Lower-timeframe requests return 24 arrays per bar, which TradingView lists as the heaviest thing a script can hold in
+// memory. On a chart that needs no drill-down (every alert chart) they are cut to a handful of bars so the alert server
+// does not run out of memory and stop the alert with a calculation error.
+// (computed inline because calc_bars_count needs a simple int, and a user function would return a series)
+int lo_bars_d = timeframe.in_seconds(TF0) < chart_sec ? 100000 : 5
+int lo_bars_w = timeframe.in_seconds(TF1) < chart_sec ? 100000 : 5
 
 [d_sf, d_st, d_sb, d_stm, d_sn, d_si, d_df, d_dt, d_db, d_dtm, d_dn, d_di, d_c, d_h, d_l, d_a, d_stn, d_st0, d_st1, d_stx, d_dtn, d_dt0, d_dt1, d_dtx] = request.security(syminfo.tickerid, tf_d_hi, tf_pack())
 [w_sf, w_st, w_sb, w_stm, w_sn, w_si, w_df, w_dt, w_db, w_dtm, w_dn, w_di, w_c, w_h, w_l, w_a, w_stn, w_st0, w_st1, w_stx, w_dtn, w_dt0, w_dt1, w_dtx] = request.security(syminfo.tickerid, tf_w_hi, tf_pack())
 [m_sf, m_st, m_sb, m_stm, m_sn, m_si, m_df, m_dt, m_db, m_dtm, m_dn, m_di, m_c, m_h, m_l, m_a, m_stn, m_st0, m_st1, m_stx, m_dtn, m_dt0, m_dt1, m_dtx] = request.security(syminfo.tickerid, tf_m_hi, tf_pack())
 
-[d_sf_a, d_st_a, d_sb_a, d_stm_a, d_sn_a, d_si_a, d_df_a, d_dt_a, d_db_a, d_dtm_a, d_dn_a, d_di_a, d_c_a, d_h_a, d_l_a, d_a_a, d_stn_a, d_st0_a, d_st1_a, d_stx_a, d_dtn_a, d_dt0_a, d_dt1_a, d_dtx_a] = request.security_lower_tf(syminfo.tickerid, tf_d_lo, tf_pack())
-[w_sf_a, w_st_a, w_sb_a, w_stm_a, w_sn_a, w_si_a, w_df_a, w_dt_a, w_db_a, w_dtm_a, w_dn_a, w_di_a, w_c_a, w_h_a, w_l_a, w_a_a, w_stn_a, w_st0_a, w_st1_a, w_stx_a, w_dtn_a, w_dt0_a, w_dt1_a, w_dtx_a] = request.security_lower_tf(syminfo.tickerid, tf_w_lo, tf_pack())
+[d_sf_a, d_st_a, d_sb_a, d_stm_a, d_sn_a, d_si_a, d_df_a, d_dt_a, d_db_a, d_dtm_a, d_dn_a, d_di_a, d_c_a, d_h_a, d_l_a, d_a_a, d_stn_a, d_st0_a, d_st1_a, d_stx_a, d_dtn_a, d_dt0_a, d_dt1_a, d_dtx_a] = request.security_lower_tf(syminfo.tickerid, tf_d_lo, tf_pack(), calc_bars_count=lo_bars_d)
+[w_sf_a, w_st_a, w_sb_a, w_stm_a, w_sn_a, w_si_a, w_df_a, w_dt_a, w_db_a, w_dtm_a, w_dn_a, w_di_a, w_c_a, w_h_a, w_l_a, w_a_a, w_stn_a, w_st0_a, w_st1_a, w_stx_a, w_dtn_a, w_dt0_a, w_dt1_a, w_dtx_a] = request.security_lower_tf(syminfo.tickerid, tf_w_lo, tf_pack(), calc_bars_count=lo_bars_w)
 
 //-----------------------------------------------------------------------------
 // ZONE FUNCTIONS

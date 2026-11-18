@@ -37,8 +37,8 @@ The Jay S&D indicator scores its two target zones itself on every bar close and 
 One-time setup:
 
 1. **Store.** In the Vercel project open Storage, Create Database, pick Upstash Redis and connect it to the project. That adds `KV_REST_API_URL` and `KV_REST_API_TOKEN` automatically.
-2. **Secret.** Pick any long random string and add it as `SCAN_SECRET` with `vercel env add SCAN_SECRET production`. Redeploy once so both take effect.
-3. **Alerts.** For each symbol, on a 1H chart with Jay S&D on it: create an alert, condition Jay S&D then Any alert() function call, Once per bar close, webhook URL `https://zone-scorecard.vercel.app/api/setup-alert?key=SCAN_SECRET`.
+2. **Sender check.** By default the webhook accepts only TradingView's published webhook addresses, so no secret is needed. To use a key instead, add `SCAN_SECRET` with `vercel env add SCAN_SECRET production`, redeploy, and append `?key=SCAN_SECRET` to the webhook URL.
+3. **Alerts.** For each symbol, on a 1H chart with Jay S&D on it: create an alert, condition Jay S&D then Any alert() function call, Once per bar close, webhook URL `https://zone-scorecard.vercel.app/api/setup-alert`.
 
 Endpoints: `POST /api/setup-alert?key=...` receives the alert JSON; `GET /api/setups` lists the latest reports.
 

@@ -1,7 +1,11 @@
 // Webhook for Jay S&D setup alerts. TradingView posts the alert() JSON here on every bar close.
 // URL: /api/setup-alert?key=SCAN_SECRET
-import { send } from "./_shared.js";
+import { send, clientIp } from "./_shared.js";
 import { hasRedis, pipeline } from "./_redis.js";
+
+// TradingView sends webhooks from these addresses (published in its alert documentation).
+// With no SCAN_SECRET set, only these senders are accepted. With SCAN_SECRET set, the ?key= must match.
+const TRADINGVIEW_IPS = new Set(["52.89.214.238", "34.212.75.30", "54.218.53.128", "52.32.178.7"]);
 
 const MAX_BYTES = 64 * 1024;
 const SIDES = new Set(["BUY", "SELL"]);
@@ -29,8 +33,11 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return send(res, 405, { error: "POST only." });
   const secret = process.env.SCAN_SECRET || "";
   const key = new URL(req.url, "http://local").searchParams.get("key") || "";
-  if (!secret) return send(res, 503, { error: "SCAN_SECRET is not set on the server." });
-  if (key !== secret) return send(res, 401, { error: "Bad key." });
+  if (secret) {
+    if (key !== secret) return send(res, 401, { error: "Bad key." });
+  } else if (!TRADINGVIEW_IPS.has(clientIp(req))) {
+    return send(res, 401, { error: "Sender is not TradingView. Set SCAN_SECRET to use a key instead." });
+  }
   if (!hasRedis()) return send(res, 503, { error: "No Redis store is configured." });
 
   let body;

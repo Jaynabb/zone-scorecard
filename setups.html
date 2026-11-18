@@ -64,10 +64,10 @@ li { margin: 4px 0; }
     <ol>
       <li>Open the symbol on a <b>1H chart</b> with Jay S&amp;D on it. The indicator scores the Low timeframe targets of your style regardless of the chart timeframe, and a 1H chart makes the alert run every hour.</li>
       <li>Create an alert: Condition <b>Jay S&amp;D</b>, then <b>Any alert() function call</b>. Options: <b>Once per bar close</b>. Expiration: open ended.</li>
-      <li>Notifications: tick <b>Webhook URL</b> and paste <code id="hook">https://zone-scorecard.vercel.app/api/setup-alert?key=YOUR_SCAN_SECRET</code>. Leave the message as it is.</li>
+      <li>Notifications: tick <b>Webhook URL</b> and paste <code id="hook">https://zone-scorecard.vercel.app/api/setup-alert</code>. Leave the message as it is.</li>
       <li>Repeat for each symbol in your watchlist. One alert per symbol.</li>
     </ol>
-    <p class="hint">The key is the SCAN_SECRET value set in Vercel. The board stores only the latest report per symbol and side, plus a short history.</p>
+    <p class="hint">Only TradingView's own webhook servers are accepted. If you set a SCAN_SECRET in Vercel, add <code>?key=YOUR_SECRET</code> to the URL instead. The board stores only the latest report per symbol and side, plus a short history.</p>
   </div>
 </div>
 <script>
@@ -119,7 +119,7 @@ li { margin: 4px 0; }
   }
   $("refresh").addEventListener("click", load);
   $("onlyValid").addEventListener("change", load);
-  $("hook").textContent = location.origin + "/api/setup-alert?key=YOUR_SCAN_SECRET";
+  $("hook").textContent = location.origin + "/api/setup-alert";
   load();
   setInterval(load, 60000);
 })();

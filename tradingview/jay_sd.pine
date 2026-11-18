@@ -245,9 +245,9 @@ backing(int slot, bool is_supply, box b) =>
 zone_text(int slot, bool is_supply, Zone z, string tag) =>
     [w, tr, nm] = zone_style(slot)
     box b = z.b
-    // second line keeps the label narrow enough to clear the price axis
+    // three short lines keep the label narrow enough to clear the price axis
     string facts = "base " + str.tostring(z.base_n) + " | touches " + str.tostring(z.touches) + (z.touches > 0 ? " (" + str.tostring(math.round(z.depth * 100)) + "% deep)" : "") + " | OS " + (z.os ? "yes" : "no")
-    nm + (is_supply ? " SUPPLY" : " DEMAND") + " " + str.tostring(b.get_bottom(), format.mintick) + " - " + str.tostring(b.get_top(), format.mintick) + "  TARGET" + tag + "\n" + facts
+    nm + (is_supply ? " SUPPLY" : " DEMAND") + " " + str.tostring(b.get_bottom(), format.mintick) + " - " + str.tostring(b.get_top(), format.mintick) + "\nTARGET" + tag + "\n" + facts
 
 // Puts the target label in the empty space to the right of the last candle, where no candle can cover it.
 mark_target(int slot, bool is_supply, Zone z, string tag) =>

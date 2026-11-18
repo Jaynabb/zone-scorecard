@@ -59,7 +59,8 @@ type Zone
     bool inside = false
     int base_n = 0        // number of base candles the zone was built from
     float depth = 0.0     // deepest retest so far, as a fraction of the zone height (0 to 1)
-    bool os = false       // oppositional structure: the move out broke an opposing zone of the same timeframe
+    bool os = false       // oppositional structure: the move out of the zone, before any retest, closed through an opposing zone of the same timeframe
+    int lt = 0            // time of the base's first candle
 
 // slot 0 = Daily, 1 = Weekly, 2 = Monthly
 var array<Zone> sup_d = array.new<Zone>()
@@ -305,6 +306,7 @@ create_zone(array<Zone> zones, bool is_supply, float z_top, float z_btm, int lef
         box b = box.new(left_time, top, time, btm, xloc=xloc.bar_time, border_color=base, border_width=w, bgcolor=color.new(base, tr), text="", text_color=label_color, text_size=size.small, text_halign=text.align_right, text_valign=text.align_center, extend=extend.none)
         Zone z = Zone.new(b)
         z.base_n := n
+        z.lt := left_time
         z.os := broke_opposing(slot, is_supply, left_time, imp_t)
         zones.unshift(z)
         zones.trim(max_zones)
@@ -363,6 +365,23 @@ add_once(array<Zone> zones, bool is_supply, int slot, bool found, float top, flo
                 seen_keys.pop()
             create_zone(zones, is_supply, top, btm, lt, slot, atr_tf, n, imp_t)
 
+// Oppositional structure covers the whole directional move out of the zone, not just the impulse candle:
+// until the zone's first retest, any close through an opposing zone of the same timeframe since the base sets the flag.
+method update_os(array<Zone> zones, bool is_supply, int slot) =>
+    if zones.size() > 0 and brk_t.size() > 0
+        int key = slot * 2 + (is_supply ? 1 : 0)
+        int slack = timeframe.in_seconds() * 1000
+        for i = 0 to zones.size() - 1
+            Zone z = zones.get(i)
+            if not z.os and z.touches == 0
+                for j = 0 to brk_t.size() - 1
+                    int bt = brk_t.get(j)
+                    if bt < z.lt - slack
+                        break
+                    if brk_k.get(j) == key
+                        z.os := true
+                        break
+
 process_slot(int slot, int mode, bool show, array<Zone> sup, array<Zone> dem, bool h_sf, float h_st, float h_sb, int h_stm, int h_sn, int h_si, bool h_df, float h_dt, float h_db, int h_dtm, int h_dn, int h_di, float h_c, float h_h, float h_l, float h_a, array<bool> l_sf, array<float> l_st, array<float> l_sb, array<int> l_stm, array<int> l_sn, array<int> l_si, array<bool> l_df, array<float> l_dt, array<float> l_db, array<int> l_dtm, array<int> l_dn, array<int> l_di, array<float> l_c, array<float> l_h, array<float> l_l, array<float> l_a) =>
     if show
         if mode == 2
@@ -372,11 +391,15 @@ process_slot(int slot, int mode, bool show, array<Zone> sup, array<Zone> dem, bo
                     add_once(dem, false, slot, l_df.get(i), l_dt.get(i), l_db.get(i), l_dtm.get(i), l_dn.get(i), l_di.get(i), l_a.get(i))
                     monitor(sup, true, slot, l_c.get(i), l_h.get(i), l_l.get(i))
                     monitor(dem, false, slot, l_c.get(i), l_h.get(i), l_l.get(i))
+                sup.update_os(true, slot)
+                dem.update_os(false, slot)
         else
             add_once(sup, true, slot, h_sf, h_st, h_sb, h_stm, h_sn, h_si, h_a)
             add_once(dem, false, slot, h_df, h_dt, h_db, h_dtm, h_dn, h_di, h_a)
             monitor(sup, true, slot, h_c, h_h, h_l)
             monitor(dem, false, slot, h_c, h_h, h_l)
+            sup.update_os(true, slot)
+            dem.update_os(false, slot)
 
 // Sizes every box: either anchored at its base candle and extended to the right margin, or a fixed
 // width per timeframe measured back from the last candle (Daily shortest, Monthly longest).

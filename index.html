@@ -447,8 +447,8 @@ footer { margin-top: 40px; padding: 22px 0 40px; border-top: 1px solid var(--rul
     { id: "strength", name: "Strength", qs: [
       { id: "str1", q: function (t) { return "Was the move out of the zone 2x the zone or greater?"; },
         opts: [ { label: "Yes", sub: "", pts: 2 }, { label: "No", sub: "", pts: 0 } ] },
-      { id: "str2", q: function (t) { return "Did the move-out candle close past the previous supply or demand on the left side?"; },
-        hint: "This is oppositional structure.",
+      { id: "str2", q: function (t) { return "Did the move out of the zone close past the previous supply or demand on the left side?"; },
+        hint: "This is oppositional structure. Count the whole directional move out of the zone, up to its first retest, not just the first candle.",
         opts: [ { label: "Yes", sub: "", pts: 2 }, { label: "No", sub: "", pts: 0 } ] }
     ] },
     { id: "purity", name: "Purity", qs: [

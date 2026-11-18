@@ -11,14 +11,15 @@ float impulse_mult = input.float(1.0, 'Impulse Min Body (x typical body)', minva
 float base_mult = input.float(0.5, 'Base Candle Max (x impulse body)', minval=0.1, maxval=1.0, step=0.1, group=poi_group, tooltip='A candle counts as part of the base only if its body is at most this fraction of the impulse body. 0.5 means the impulse is at least twice every base candle.')
 int base_max = input.int(4, 'Max Base Candles', minval=1, maxval=20, group=poi_group, tooltip='The base is the run of small candles immediately left of the impulse. Each one must share price with the candle right next to the impulse, so the walk stops where the pause started. Supply zone = base wick high to lowest base body. Demand zone = base wick low to highest base body.')
 float box_width = input.float(1.0, 'Fallback Zone Width (x typical body)', step=0.25, group=poi_group, tooltip='Only used when the base has no height, for example a single doji with no wick.')
-int zz_len = input.int(10, 'Zig Zag Swing Length', minval=1, group=poi_group, tooltip='Only used by the Zig Zag and swing labels on the chart timeframe.')
+int zz_len = input.int(10, 'Zig Zag Swing Length', minval=1, group=poi_group, tooltip='A swing high must be the highest high of this many candles to its left (mirror for lows). Used by the zig zag and the trend readout.')
+int zz_right = input.int(2, 'Swing Confirmation Bars', minval=1, group=poi_group, tooltip='How many candles must close after an extreme before it counts as a swing. Small keeps the swings and the trend readout current; large makes them more certain.')
 
 string filt_group = 'Zone Filters'
 bool use_departure = input.bool(true, 'Require Strong Departure', group=filt_group, tooltip='Keep a zone only if price left it by at least the departure multiple of the zone height within the given number of candles. This is the 2x move rule.')
 float dep_mult = input.float(1.0, 'Departure (x zone height)', minval=0.25, step=0.25, group=filt_group, tooltip='Price must travel at least this many zone heights beyond the zone edge for the zone to count. Your 2x scoring rule still applies on the scorecard; this only decides whether a zone is drawn.')
 int dep_bars = input.int(8, 'Departure Within (candles)', minval=1, maxval=20, group=filt_group, tooltip='A zone appears as soon as the impulse candle alone has departed this far, otherwise once the follow-through has, checked this many candles after the impulse.')
 float max_height_mult = input.float(4.0, 'Max Zone Height (x typical body)', minval=0.5, step=0.5, group=filt_group, tooltip='Zones taller than this many typical bodies of their own timeframe are skipped.')
-int max_touches = input.int(2, 'Remove Zone After N Touches', minval=0, group=filt_group, tooltip='A touch is price entering the zone without closing through it. 0 = never remove by touches.')
+int max_touches = input.int(0, 'Remove Zone After N Touches', minval=0, group=filt_group, tooltip='A retest is price coming back into the zone after a candle closed back outside it. 0 = never remove by retests; purity is scored on the sheet instead.')
 bool corr_only = input.bool(false, 'Hide Higher Timeframe Zones Without Correlation', group=filt_group, tooltip='Off: higher timeframe zones are drawn as hollow frames wherever they are, which shows where price is heading. On: they are drawn only where they overlap a chart timeframe zone of the same side. Zones from lower timeframes are never drawn either way.')
 int show_n = input.int(3, 'Show Nearest Zones Per Side', minval=1, maxval=20, group=filt_group, tooltip='Per timeframe: draw only this many supply zones above price and demand zones below price. The rest stay in memory and appear when price moves toward them.')
 
@@ -339,7 +340,8 @@ create_zone(array<Zone> zones, bool is_supply, float z_top, float z_btm, int lef
         zones.trim(max_zones)
 
 // Break: a candle of the zone's own timeframe closes through the wick edge.
-// Touch: price enters the zone without closing through it. After max_touches the zone is spent.
+// Retest: price comes back into the zone after a candle closed back outside it. Consecutive candles inside the zone
+// are one visit. A candle that wicks in and closes outside ends the visit, so the next entry is a new retest.
 monitor(array<Zone> zones, bool is_supply, int slot, float c, float h, float l) =>
     if zones.size() > 0 and not na(c)
         for i = zones.size() - 1 to 0
@@ -372,6 +374,7 @@ monitor(array<Zone> zones, bool is_supply, int slot, float c, float h, float l) 
                 zones.remove(i)
                 continue
             bool touching = is_supply ? h >= b.get_bottom() : l <= b.get_top()
+            bool closed_out = is_supply ? c < b.get_bottom() : c > b.get_top()
             if touching and not z.inside
                 z.touches += 1
             if touching
@@ -379,7 +382,7 @@ monitor(array<Zone> zones, bool is_supply, int slot, float c, float h, float l) 
                 if hgt > 0
                     float pen = is_supply ? (h - b.get_bottom()) / hgt : (b.get_top() - l) / hgt
                     z.depth := math.max(z.depth, math.min(math.max(pen, 0.0), 1.0))
-            z.inside := touching
+            z.inside := touching and not closed_out
             if max_touches > 0 and z.touches > max_touches
                 b.delete()
                 zones.remove(i)
@@ -631,8 +634,8 @@ trend_pack() =>
     var float last = na
     var int state = 0
     var float cp = na
-    float ph = ta.pivothigh(high, zz_len, zz_len)
-    float pl = ta.pivotlow(low, zz_len, zz_len)
+    float ph = ta.pivothigh(high, zz_len, zz_right)
+    float pl = ta.pivotlow(low, zz_len, zz_right)
     bool is_high = not na(ph)
     bool is_low = not na(pl)
     bool changed = false
@@ -710,14 +713,14 @@ if barstate.islast and show_trend
 //-----------------------------------------------------------------------------
 // ZIG ZAG AND SWING LABELS (chart timeframe only)
 //-----------------------------------------------------------------------------
-float n_ph = ta.pivothigh(high, zz_len, zz_len)
-float n_pl = ta.pivotlow(low, zz_len, zz_len)
+float n_ph = ta.pivothigh(high, zz_len, zz_right)
+float n_pl = ta.pivotlow(low, zz_len, zz_right)
 
 if show_labels
     if not na(n_ph)
-        label.new(bar_index[zz_len], n_ph, "High", style=label.style_label_down, color=color.new(color.white, 100), textcolor=label_color, size=size.tiny)
+        label.new(bar_index[zz_right], n_ph, "High", style=label.style_label_down, color=color.new(color.white, 100), textcolor=label_color, size=size.tiny)
     if not na(n_pl)
-        label.new(bar_index[zz_len], n_pl, "Low", style=label.style_label_up, color=color.new(color.white, 100), textcolor=label_color, size=size.tiny)
+        label.new(bar_index[zz_right], n_pl, "Low", style=label.style_label_up, color=color.new(color.white, 100), textcolor=label_color, size=size.tiny)
 
 var line zz_line = na
 var float last_zz_price = 0.0
@@ -734,25 +737,25 @@ if show_zigzag
         if n_ph > last_zz_price
             last_zz_price := n_ph
             if not na(zz_line)
-                zz_line.set_xy2(bar_index[zz_len], last_zz_price)
+                zz_line.set_xy2(bar_index[zz_right], last_zz_price)
 
     else if dir_up and is_low
         dir_up := false
         last_zz_price := n_pl
         if not na(zz_line)
-            zz_line := line.new(zz_line.get_x2(), zz_line.get_y2(), bar_index[zz_len], last_zz_price, color=zigzag_color, width=2)
+            zz_line := line.new(zz_line.get_x2(), zz_line.get_y2(), bar_index[zz_right], last_zz_price, color=zigzag_color, width=2)
 
     else if not dir_up and is_low
         if n_pl < last_zz_price
             last_zz_price := n_pl
             if not na(zz_line)
-                zz_line.set_xy2(bar_index[zz_len], last_zz_price)
+                zz_line.set_xy2(bar_index[zz_right], last_zz_price)
 
     else if not dir_up and is_high
         dir_up := true
         last_zz_price := n_ph
         if not na(zz_line)
-            zz_line := line.new(zz_line.get_x2(), zz_line.get_y2(), bar_index[zz_len], last_zz_price, color=zigzag_color, width=2)
+            zz_line := line.new(zz_line.get_x2(), zz_line.get_y2(), bar_index[zz_right], last_zz_price, color=zigzag_color, width=2)
 
     if na(zz_line) and (is_high or is_low)
-        zz_line := line.new(bar_index, close, bar_index[zz_len], is_high ? n_ph : n_pl, color=zigzag_color, width=2)
+        zz_line := line.new(bar_index, close, bar_index[zz_right], is_high ? n_ph : n_pl, color=zigzag_color, width=2)

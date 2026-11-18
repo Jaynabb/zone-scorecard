@@ -64,7 +64,9 @@ export default async function handler(req, res) {
     at: now
   };
 
+  const styleKey = (common.style || "position").toLowerCase().replace(/[^a-z]/g, "").slice(0, 12) || "position";
   const cmds = [];
+  const seenSides = new Set();
   let stored = 0;
   for (const s of setups) {
     if (!s || typeof s !== "object") continue;
@@ -73,7 +75,7 @@ export default async function handler(req, res) {
     const score = int(s.score, 0, 20);
     if (score === null) continue;
     const checks = s.checks && typeof s.checks === "object" ? s.checks : {};
-    const styleKey = (common.style || "position").toLowerCase().replace(/[^a-z]/g, "").slice(0, 12) || "position";
+    seenSides.add(side);
     const rec = Object.assign({}, common, {
       id: symbol + ":" + styleKey + ":" + side,
       side,
@@ -96,8 +98,16 @@ export default async function handler(req, res) {
     cmds.push(["LPUSH", "setups:log", json]);
     stored++;
   }
-  if (!stored) return send(res, 400, { error: "No usable setups in payload." });
-  cmds.push(["LTRIM", "setups:log", "0", "999"]);
+  // a side the chart no longer targets (zone broke, or price left it behind) comes off the board
+  for (const side of SIDES) {
+    if (seenSides.has(side)) continue;
+    cmds.push(["HDEL", "setups:latest", symbol + ":" + styleKey + ":" + side]);
+    cmds.push(["ZREM", "setups:valid", symbol + ":" + styleKey + ":" + side]);
+  }
+  if (stored) cmds.push(["LTRIM", "setups:log", "0", "999"]);
+  // heartbeat per symbol and style, even with nothing to report, so the board can show which alerts are alive
+  const feed = { symbol, style: common.style, chart_tf: common.chart_tf, low_tf: common.low_tf, price: common.price, bar_time: common.bar_time, targets: stored, at: now };
+  cmds.push(["HSET", "setups:seen", symbol + ":" + styleKey, JSON.stringify(feed)]);
   cmds.push(["SET", "setups:last_seen:" + symbol, String(now)]);
   try { await pipeline(cmds); }
   catch (e) { return send(res, 502, { error: "Store failed: " + (e && e.message ? e.message : "unknown") }); }

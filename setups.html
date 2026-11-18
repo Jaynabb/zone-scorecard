@@ -28,6 +28,9 @@ table { width:100%; border-collapse: collapse; background: var(--surface); borde
 th, td { text-align:left; padding:10px 12px; border-bottom:1px solid var(--rule); vertical-align: top; font-size: 14px; }
 th { font-weight:600; color:var(--slate); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
 tr.valid td { background: #EAF5F2; }
+.feeds { margin: 0 0 14px; font-size: 13px; line-height: 2; }
+.feed { display: inline-block; border: 1px solid #D9D9D4; border-radius: 999px; padding: 0 10px; margin: 0 6px 4px 0; background: #fff; }
+.feed.silent { border-color: #C96A5A; color: #9B3F31; background: #FBEFEC; }
 .score { font: 400 30px/1 var(--serif); }
 .score small { font-size: 14px; color: var(--slate); }
 .checks { display:flex; flex-wrap:wrap; gap:4px; }
@@ -57,13 +60,15 @@ li { margin: 4px 0; }
     <button class="chip" id="refresh" type="button">Refresh</button>
   </div>
 
+  <div id="feeds" class="feeds"></div>
+
   <div id="board"></div>
 
   <div class="box" id="howto">
     <h2>Connect a symbol</h2>
     <ol>
       <li>Open the symbol on a <b>1H chart</b> with Jay S&amp;D on it. The indicator scores the Low timeframe targets of your style regardless of the chart timeframe, and a 1H chart makes the alert run every hour.</li>
-      <li>Create an alert: Condition <b>Jay S&amp;D</b>, then <b>Any alert() function call</b>. Options: <b>Once per bar close</b>. Expiration: open ended.</li>
+      <li>Create an alert: Condition <b>Jay S&amp;D</b>, then <b>Any alert() function call</b>. Options: <b>Once per bar close</b>. Expiration: as far out as your plan allows (open ended on Premium).</li>
       <li>Notifications: tick <b>Webhook URL</b> and paste <code id="hook">https://zone-scorecard.vercel.app/api/setup-alert</code>. Leave the message as it is.</li>
       <li>Repeat for each symbol in your watchlist. One alert per symbol.</li>
     </ol>
@@ -98,7 +103,30 @@ li { margin: 4px 0; }
       "<td>" + esc(s.mid_tf || "Mid") + " " + esc(s.trend || "") + (typeof s.control_point === "number" ? "<br><span class='muted'>cp " + s.control_point + "</span>" : "") + "</td>" +
       "<td class='muted'>" + ago(s.at) + "</td></tr>";
   }
+  function tfMinutes(tf) {
+    tf = String(tf || "");
+    if (/^\d+$/.test(tf)) return parseInt(tf, 10);
+    if (/^\d+S$/.test(tf)) return 1;
+    if (/^\d*D$/.test(tf)) return (parseInt(tf, 10) || 1) * 1440;
+    if (/^\d*W$/.test(tf)) return (parseInt(tf, 10) || 1) * 10080;
+    if (/^\d*M$/.test(tf)) return (parseInt(tf, 10) || 1) * 43200;
+    return 60;
+  }
+  function tfLabel(tf) { tf = String(tf || ""); return /^\d+$/.test(tf) ? (parseInt(tf, 10) % 60 === 0 ? (parseInt(tf, 10) / 60) + "h" : tf + "m") : tf; }
+  function renderFeeds(data) {
+    var feeds = data.feeds || [];
+    if (!feeds.length) { $("feeds").innerHTML = ""; return; }
+    // silent = no report for more than three bars of the alert's chart (markets that are closed will show silent too)
+    var html = feeds.map(function (f) {
+      var age = Date.now() - f.at;
+      var silent = age > 3 * tfMinutes(f.chart_tf) * 60000;
+      return '<span class="feed' + (silent ? " silent" : "") + '" title="' + esc(f.style || "") + ' on a ' + esc(tfLabel(f.chart_tf)) + ' chart, ' + (f.targets || 0) + ' target' + (f.targets === 1 ? "" : "s") + ' in the last report">' +
+        "<b>" + esc(f.symbol) + "</b> " + esc(tfLabel(f.chart_tf)) + " · " + ago(f.at) + (silent ? " · silent" : "") + "</span>";
+    }).join("");
+    $("feeds").innerHTML = '<span class="muted">Alerts reporting:</span> ' + html;
+  }
   function render(data) {
+    renderFeeds(data);
     var list = data.setups || [];
     if ($("onlyValid").checked) list = list.filter(function (s) { return s.valid; });
     var valid = (data.setups || []).filter(function (s) { return s.valid; }).length;

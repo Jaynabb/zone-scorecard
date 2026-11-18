@@ -122,11 +122,13 @@ detect(bool is_supply, int k, float yard) =>
             z_btm := is_supply ? (na(z_btm) ? bl : math.min(z_btm, bl)) : w_lo
             lt := time[off]
         // V-shaped turn: no small base, but the candle next to the impulse holds the extreme.
-        // That candle is the base on its own, wick to body.
+        // That candle is the base on its own, wick to body, provided it is a normal sized candle
+        // (body no bigger than one typical body). A big candle is a drive, not a base.
         if cnt == 0
             int off = k + 1
             bool holds_extreme = is_supply ? high[off] >= high[k] : low[off] <= low[k]
-            if not na(close[off]) and holds_extreme
+            bool normal_size = math.abs(close[off] - open[off]) <= yard
+            if not na(close[off]) and holds_extreme and normal_size
                 z_top := is_supply ? high[off] : math.max(open[off], close[off])
                 z_btm := is_supply ? math.min(open[off], close[off]) : low[off]
                 lt := time[off]

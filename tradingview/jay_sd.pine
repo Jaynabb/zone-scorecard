@@ -56,6 +56,7 @@ string scan_group = 'Scanner'
 int alert_min = input.int(14, 'Valid Setup Score', minval=0, maxval=20, group=scan_group, tooltip='A target zone whose automatic score reaches this is a valid setup on the board. The alert payload carries every score, so the board can show the rest too.')
 bool alerts_on = input.bool(true, 'Send Setup Alerts', group=scan_group, tooltip='Fires alert() on every bar close with both target zones and their scores as JSON. Create one alert per symbol: condition Jay S&D, Any alert() function call, Once per bar close, with the webhook URL from the Zone Scorecard site. A 1H chart gives an hourly scan.')
 bool show_score = input.bool(true, 'Show Score In Target Label', group=scan_group, tooltip='Adds a SCORE line to each target label with the indicator\'s own point estimate for every check.')
+float approach_pct = input.float(0.8, 'Approach Alert At (share of the way)', minval=0.1, maxval=0.99, step=0.05, group=scan_group, tooltip='Fires the "Price near a target zone" alert condition when price has covered this share of the distance between the two target zones, heading into one of them. Create a separate alert for it with sound on.')
 string visual_group = 'Visual Settings'
 color sup_d_col = input.color(#FF6B6B, 'Low TF Supply / Demand', group=visual_group, inline='sd')
 color sup_w_col = input.color(#E03131, 'Mid TF Supply / Demand', group=visual_group, inline='sw')
@@ -824,6 +825,9 @@ setup_json(Zone z, bool is_supply, int slot, string tag, int total, int s_range,
     [w, tr, nm] = zone_style(slot)
     '{"side":"' + (is_supply ? "SELL" : "BUY") + '","zone":"' + nm + (is_supply ? " SUPPLY " : " DEMAND ") + str.tostring(b.get_bottom(), format.mintick) + " - " + str.tostring(b.get_top(), format.mintick) + '","top":' + num(b.get_top()) + ',"btm":' + num(b.get_bottom()) + ',"backing":"' + str.trim(tag) + '","base":' + str.tostring(z.base_n) + ',"touches":' + str.tostring(z.touches) + ',"depth":' + num(z.depth) + ',"os":' + (z.os ? "true" : "false") + ',"score":' + str.tostring(total) + ',"checks":{"range":' + str.tostring(s_range) + ',"time":' + str.tostring(s_time) + ',"trend":' + str.tostring(s_trend) + ',"move":' + str.tostring(s_move) + ',"os":' + str.tostring(s_os) + ',"purity":' + str.tostring(s_pur) + ',"rrr":' + str.tostring(s_rrr) + '},"rrr_ratio":' + num(rrr) + ',"move_ratio":' + num(ratio) + ',"range_pos":' + num(pos) + '}'
 
+// approach: how far price has travelled between the two target zones toward the one ahead
+var float prog_prev = na
+bool approach_now = false
 if barstate.islast
     Zone tgt_sup = na
     Zone tgt_dem = na
@@ -858,10 +862,21 @@ if barstate.islast
         [tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp] = score_zone(tgt_dem, false, r_top, r_btm, opp)
         mark_target(tgt_dem_slot, false, tgt_dem, tgt_dem_tag, show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp) : "")
         d_json := setup_json(tgt_dem, false, tgt_dem_slot, tgt_dem_tag, tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp)
+    if not na(tgt_sup) and not na(tgt_dem)
+        float s_edge = tgt_sup.b.get_bottom()
+        float d_edge = tgt_dem.b.get_top()
+        float span = s_edge - d_edge
+        if span > 0
+            float prog = math.max((close - d_edge) / span, (s_edge - close) / span)
+            if not na(prog_prev) and prog >= approach_pct and prog_prev < approach_pct and prog < 1
+                approach_now := true
+            prog_prev := prog
     if alerts_on and barstate.isconfirmed and (s_json != "" or d_json != "")
         string trend_s = t_st == 1 ? "UP" : t_st == -1 ? "DOWN" : "RANGE"
         string msg = '{"symbol":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","chart_tf":"' + timeframe.period + '","style":"' + style + '","low_tf":"' + tf_name(TF0) + '","mid_tf":"' + tf_name(TF1) + '","high_tf":"' + tf_name(TF2) + '","price":' + num(close) + ',"bar_time":' + str.tostring(time) + ',"trend":"' + trend_s + '","control_point":' + num(t_cp) + ',"range_top":' + num(r_top) + ',"range_btm":' + num(r_btm) + ',"alert_min":' + str.tostring(alert_min) + ',"setups":[' + s_json + (s_json != "" and d_json != "" ? "," : "") + d_json + ']}'
         alert(msg, alert.freq_once_per_bar_close)
+
+alertcondition(approach_now, "Price near a target zone", "{{ticker}}: price has covered 80% of the way to the next target zone")
 
 //-----------------------------------------------------------------------------
 // ZIG ZAG AND SWING LABELS (chart timeframe only)

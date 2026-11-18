@@ -52,7 +52,11 @@ function buildPrompt(direction, zone, tf) {
     "Timeframe is shown by shade and width: Daily zones are the lightest shade and the shortest boxes, Weekly zones a medium shade and longer, Monthly zones the darkest shade and the longest. " +
     "Where zones of different timeframes overlap, the fills stack and the shorter box sits inside the longer one: that is correlation. " +
     "Only the nearest box on each side of price is labeled: it has a thick white outline and a label with its timeframe, side, price range and the word TARGET, " +
-    "for example DAILY DEMAND 1720.31 - 1743.28 TARGET +W +M. A suffix +W means a Weekly zone overlaps it and +M means a Monthly zone overlaps it; no suffix means no higher timeframe backing. " +
+    "for example DAILY DEMAND 1720.31 - 1743.28 TARGET +W +M | base 3 | touches 1 (40% deep) | OS yes. A suffix +W means a Weekly zone overlaps it and +M means a Monthly zone overlaps it; no suffix means no higher timeframe backing. " +
+    "After the backing come three facts measured by the indicator itself, which are exact and override anything you would estimate by eye: 'base N' is the number of base candles the zone was built from; " +
+    "'touches N' is how many times price has come back into the zone since it was created, with the deepest retest as a share of the zone height in brackets, and 'touches 0' means never retouched; " +
+    "'OS yes' means the move out of the zone closed through an opposing zone of the same timeframe (oppositional structure), 'OS no' means it did not. " +
+    "The grey zig zag line on each chart joins the confirmed swing highs and lows of that chart's timeframe; the leg after its last pivot is the current, unconfirmed move. " +
     "Other boxes have no label. The labeled boxes are always the nearest Daily zones, on every chart including the Weekly and Monthly, because the entry is taken from the Daily zone and trend is scored against it. " +
     "Boxes have a fixed width and do not start at their base candle; find the base candles by price, where the candles paused inside the zone's price range before the move out. Use the price range in the label as the zone's exact top and bottom. " +
     "How the charts are drawn (TradingView, dark theme): the range comes from the High timeframe (" + high + ") and is shown on every chart as a retracement tool with horizontal levels labeled by percentage: 100.00% is the top of the range, 0.00% is the bottom, with 75.00% and 25.00% in between. " +
@@ -64,14 +68,17 @@ function buildPrompt(direction, zone, tf) {
     "Answer these checks. " +
     "1. RANGE: where does the target zone sit in the range? 'top_or_bottom' means selling at the top where banks sold or buying at the bottom where banks bought (a sell zone in or above the upper purple band, or a buy zone in or below the lower purple band). " +
     "'middle' means the zone is in the blue band. 'opposite' means buying where banks sold or selling where banks bought (a buy zone at the top, or a sell zone at the bottom). " +
-    "2. TIME: count the base candles inside the target zone on the Low chart (the candles that formed the zone before the move out). 'one_to_three', 'four_to_six' or 'seven_plus'. Give the count. " +
-    "3. TREND: what will the Mid timeframe trend be when price travels to the target zone? A trend is 3 segments: an impulse that breaks the control point, a pullback to a pivot, a new impulse past the last extreme. " +
+    "2. TIME: read 'base N' from the target label and pick 'one_to_three', 'four_to_six' or 'seven_plus' from it with high confidence. State the count. Only count candles by eye if the label is unreadable. " +
+    "3. TREND: what will the Mid timeframe trend be when price travels to the target zone? Read the structure only from the grey zig zag pivots on Screenshot 1, never from smaller wiggles inside a leg. " +
+    "A trend is 3 segments: an impulse that breaks the control point, a pullback to a pivot, a new impulse past the last extreme. " +
     "The control point is the lower high in a downtrend and the higher low in an uptrend. The trend holds until a candle closes through the control point. " +
+    "An uptrend needs a zig zag high above the previous zig zag high AND a low above the previous low; a downtrend needs the mirror. If the pivots show a higher low but the last high is still below the prior high, or the reverse, price is inside a range: answer 'no_trend'. " +
+    "The current unconfirmed leg counts only if it has closed beyond the last zig zag extreme. Name the two pivots you compared and their prices. " +
     "If the zone sits well short of any Mid timeframe zone or level that could flip the trend, the trend cannot change on the way. " +
     "'with_zone' means the Mid trend on arrival matches the trade (a sell matches a downtrend, a buy matches an uptrend). 'no_trend' means sideways. 'against_zone' means counter-trend. Give the trend, 3 short segment descriptions and the control point. " +
     "4. STRENGTH_MOVE: was the move out of the target zone at least 2 times the height of the zone? Estimate the ratio of the move to the zone height. " +
-    "5. STRENGTH_STRUCTURE: did the move-out candle close past the previous supply or demand on the left side of the zone? This is oppositional structure. 'yes' or 'no'. If the previous zone is not in view, say 'unclear'. " +
-    "6. PURITY: since the zone broke out, on the Low chart, has price come back into it? 'never' means never retouched. 'once' means retouched one time and less than halfway into the zone. 'multiple' means more than one retouch, or any touch deeper than halfway. " +
+    "5. STRENGTH_STRUCTURE: read 'OS yes' or 'OS no' from the target label and answer 'yes' or 'no' with high confidence. The indicator checked whether the move out closed through an opposing zone of the same timeframe. Only say 'unclear' if the label is unreadable. " +
+    "6. PURITY: read 'touches' from the target label. 'touches 0' is 'never'. 'touches 1' with a depth under 50% is 'once'. Anything else (two or more touches, or any depth of 50% or more) is 'multiple'. High confidence; quote the label values in the reason. " +
     "7. RRR: only if a position tool or entry, stop and target with readable numbers is visible, give the reward per 1 risk as a ratio and pick 'five_plus', 'three_to_five' or 'under_three'. Otherwise 'not_visible'. Never guess this one. " +
     "Set target_zone to the label of the zone you scored, including its price range, for example DAILY SUPPLY 1987.55 - 2018.59. " +
     "Set zone_found to false if you cannot identify the target zone. Use 'unclear' for any check you cannot read with reasonable confidence instead of guessing, and explain why in the reason. " +

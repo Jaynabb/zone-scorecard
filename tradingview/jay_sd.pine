@@ -673,6 +673,20 @@ refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<bo
             shown += 1
     shown_boxes
 
+// The nearest zone of one side: the closest box above price for supply, below price for demand (a box that
+// contains price counts as distance zero). Used for the automatic range and for the Weekly fallback on a Monthly chart.
+nearest_zone_box(array<Zone> zones, bool is_supply) =>
+    box best = na
+    float bd = na
+    if zones.size() > 0
+        for i = 0 to zones.size() - 1
+            box b = zones.get(i).b
+            float d = is_supply ? (b.get_bottom() > close ? b.get_bottom() - close : (b.get_top() >= close ? 0.0 : na)) : (b.get_top() < close ? close - b.get_top() : (b.get_bottom() <= close ? 0.0 : na))
+            if not na(d) and (na(bd) or d < bd)
+                bd := d
+                best := b
+    best
+
 //-----------------------------------------------------------------------------
 // MAIN LOGIC
 //-----------------------------------------------------------------------------
@@ -721,8 +735,16 @@ if barstate.islast
         refresh(dem_d, false, 0, hl_d, a_d, corr_only)
     if anchor_slot != 1
         if mode_w == 2
-            sup_w.hide_all(true, 1)
-            dem_w.hide_all(false, 1)
+            // Weekly below a Monthly chart stays hidden, except on a side where the Monthly has no zone at all:
+            // there the nearest Weekly zones stand in, the same ones the automatic range borrows
+            if na(nearest_zone_box(sup_m, true))
+                refresh(sup_w, true, 1, false, a_s, corr_only)
+            else
+                sup_w.hide_all(true, 1)
+            if na(nearest_zone_box(dem_m, false))
+                refresh(dem_w, false, 1, false, a_d, corr_only)
+            else
+                dem_w.hide_all(false, 1)
         else
             refresh(sup_w, true, 1, hl_w, a_s, corr_only)
             refresh(dem_w, false, 1, hl_w, a_d, corr_only)
@@ -814,18 +836,6 @@ if barstate.islast and show_trend
 // (100% at the middle of the nearest High timeframe supply, 0% at the middle of the nearest High timeframe demand)
 // and an automatic risk to reward (entry at the zone's near edge, stop at its far edge, target at the other target zone).
 //-----------------------------------------------------------------------------
-nearest_zone_box(array<Zone> zones, bool is_supply) =>
-    box best = na
-    float bd = na
-    if zones.size() > 0
-        for i = 0 to zones.size() - 1
-            box b = zones.get(i).b
-            float d = is_supply ? (b.get_bottom() > close ? b.get_bottom() - close : (b.get_top() >= close ? 0.0 : na)) : (b.get_top() < close ? close - b.get_top() : (b.get_bottom() <= close ? 0.0 : na))
-            if not na(d) and (na(bd) or d < bd)
-                bd := d
-                best := b
-    best
-
 // The automatic range: 100% at the middle of the nearest High timeframe supply above price, 0% at the middle of the
 // nearest High timeframe demand below. When a side has no High timeframe zone (a market at its highs or lows), the
 // nearest Mid timeframe zone on that side stands in, even on a chart where Mid zones are not drawn.

@@ -716,13 +716,14 @@ trend_pack() =>
         sh2 := sh1
         sh1 := ph
     // a confirmed swing that extends the pullback side moves the control point: lower high in a downtrend, higher low in an uptrend
-    if state == -1 and is_high and not na(cp) and ph < cp
+    // (a trend that began before its first pullback swing existed takes the first confirmed swing as its control point)
+    if state == -1 and is_high and (na(cp) or ph < cp)
         cp := ph
-    if state == 1 and is_low and not na(cp) and pl > cp
+    if state == 1 and is_low and (na(cp) or pl > cp)
         cp := pl
     // breaks are judged on the close. Resistance to beat: the control point in a downtrend, else the last swing high. Mirror for support.
-    float res = state == -1 ? cp : sh1
-    float sup = state == 1 ? cp : sl1
+    float res = state == -1 and not na(cp) ? cp : sh1
+    float sup = state == 1 and not na(cp) ? cp : sl1
     if state != 1 and not na(res) and close > res
         state := 1
         cp := sl1

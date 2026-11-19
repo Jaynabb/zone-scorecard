@@ -397,12 +397,13 @@ create_zone(array<Zone> zones, bool is_supply, float z_top, float z_btm, int lef
     bool ok = not na(top) and not na(btm)
     if (top - btm) > max_height_mult * yard_tf
         ok := false
-    // a zone read from the timeframe's own base outranks a drill-down guess that overlaps it: the guess came first
-    // only because the turn resolved before the base had departed far enough to count
+    // a zone read from the timeframe's own base outranks an overlapping zone that is either a drill-down guess or a
+    // later base. The earlier base at the extreme is the origin of the move; a later base that overlaps it is a
+    // continuation inside the impulse. Both got drawn first only because the origin had to wait for its departure
     if ok and not from_lower and zones.size() > 0
         for i = zones.size() - 1 to 0
             Zone oz = zones.get(i)
-            if oz.via_lower and top >= oz.b.get_bottom() and btm <= oz.b.get_top()
+            if (oz.via_lower or oz.lt > left_time) and top >= oz.b.get_bottom() and btm <= oz.b.get_top()
                 oz.b.delete()
                 zones.remove(i)
     if ok and not zones.overlaps(top, btm)

@@ -677,6 +677,11 @@ if barstate.islast
 // Returns [state, control point, last high, previous high, last low, previous low]; state 1 up, -1 down, 0 range.
 //-----------------------------------------------------------------------------
 trend_pack() =>
+    // Break of structure, the way the sheet scores it. A candle that closes below the last confirmed swing low
+    // starts a downtrend and the swing high before that break is the control point; each later lower high
+    // becomes the new control point; a close above the control point ends the downtrend and, being a close
+    // above the last swing high, starts the uptrend. Mirror for up. The sequence of swings matters: a higher
+    // high followed by a close through the higher low is the first leg down, not a range.
     var bool up = false
     var float sh1 = na
     var float sh2 = na
@@ -689,59 +694,45 @@ trend_pack() =>
     float pl = ta.pivotlow(low, zz_len, zz_right)
     bool is_high = not na(ph)
     bool is_low = not na(pl)
-    bool changed = false
     if na(last)
         last := close
+    // alternating swing tracker: one high, then one low, then one high ...
     if up and is_high
         if ph > last
             last := ph
             sh1 := ph
-            changed := true
     else if up and is_low
         up := false
         last := pl
         sl2 := sl1
         sl1 := pl
-        changed := true
     else if not up and is_low
         if pl < last
             last := pl
             sl1 := pl
-            changed := true
     else if not up and is_high
         up := true
         last := ph
         sh2 := sh1
         sh1 := ph
-        changed := true
-    if changed and not na(sh2) and not na(sl2)
-        if sh1 > sh2 and sl1 > sl2
-            state := 1
-            cp := sl1
-        else if sh1 < sh2 and sl1 < sl2
-            state := -1
-            cp := sh1
-        else
-            state := 0
-            cp := na
-    // the trend holds until a candle closes through the control point
-    if state == 1 and close < cp
-        state := 0
-        cp := na
-    if state == -1 and close > cp
-        state := 0
-        cp := na
-    // the current leg completes a trend once it has closed past the last swing extreme
-    if state == 0 and not na(sh1) and not na(sl1) and not na(sl2) and close > sh1 and sl1 > sl2
+    // a confirmed swing that extends the pullback side moves the control point: lower high in a downtrend, higher low in an uptrend
+    if state == -1 and is_high and not na(cp) and ph < cp
+        cp := ph
+    if state == 1 and is_low and not na(cp) and pl > cp
+        cp := pl
+    // breaks are judged on the close. Resistance to beat: the control point in a downtrend, else the last swing high. Mirror for support.
+    float res = state == -1 ? cp : sh1
+    float sup = state == 1 ? cp : sl1
+    if state != 1 and not na(res) and close > res
         state := 1
         cp := sl1
-    if state == 0 and not na(sl1) and not na(sh1) and not na(sh2) and close < sl1 and sh1 < sh2
+    else if state != -1 and not na(sup) and close < sup
         state := -1
         cp := sh1
     [state, cp, sh1, sh2, sl1, sl2]
 
 trend_line(string nm, int st, float cp, float sh1, float sh2, float sl1, float sl2) =>
-    string st_s = st == 1 ? "UP" : st == -1 ? "DOWN" : "RANGE (no trend)"
+    string st_s = st == 1 ? "UP" : st == -1 ? "DOWN" : "RANGE (no break of structure yet)"
     string cp_s = st == 1 ? " | control point " + str.tostring(cp, format.mintick) + " (a close below ends it)" : st == -1 ? " | control point " + str.tostring(cp, format.mintick) + " (a close above ends it)" : ""
     string piv = (na(sh2) or na(sl2)) ? "" : " | highs " + str.tostring(sh1, format.mintick) + (sh1 > sh2 ? " > " : " < ") + str.tostring(sh2, format.mintick) + " | lows " + str.tostring(sl1, format.mintick) + (sl1 > sl2 ? " > " : " < ") + str.tostring(sl2, format.mintick)
     nm + " TREND: " + st_s + cp_s + piv

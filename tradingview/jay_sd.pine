@@ -381,7 +381,7 @@ broke_opposing(int slot, bool is_supply, int left_time, int imp_t) =>
 // z_top, z_btm = zone edges from the base
 // yard_tf = typical (median) candle body of the zone's own timeframe
 // n = number of base candles, imp_t = time of the impulse candle
-create_zone(array<Zone> zones, bool is_supply, float z_top, float z_btm, int left_time, int slot, float yard_tf, int n, int imp_t, bool gp) =>
+create_zone(array<Zone> zones, bool is_supply, float z_top, float z_btm, int left_time, int slot, float yard_tf, int n, int imp_t, bool gp, bool from_lower) =>
     float buffer = yard_tf * box_width
     bool flat = na(z_top) or na(z_btm) or (z_top - z_btm) <= syminfo.mintick
     float anchor = is_supply ? z_top : z_btm
@@ -390,6 +390,14 @@ create_zone(array<Zone> zones, bool is_supply, float z_top, float z_btm, int lef
     bool ok = not na(top) and not na(btm)
     if (top - btm) > max_height_mult * yard_tf
         ok := false
+    // a zone read from the timeframe's own base outranks a drill-down guess that overlaps it: the guess came first
+    // only because the turn resolved before the base had departed far enough to count
+    if ok and not from_lower and zones.size() > 0
+        for i = zones.size() - 1 to 0
+            Zone oz = zones.get(i)
+            if oz.via_lower and top >= oz.b.get_bottom() and btm <= oz.b.get_top()
+                oz.b.delete()
+                zones.remove(i)
     if ok and not zones.overlaps(top, btm)
         [w, tr, nm] = zone_style(slot)
         color base = zone_color(slot, is_supply)
@@ -460,7 +468,7 @@ add_once(array<Zone> zones, bool is_supply, int slot, bool found, float top, flo
             seen_keys.unshift(key)
             if seen_keys.size() > 400
                 seen_keys.pop()
-            create_zone(zones, is_supply, top, btm, lt, slot, atr_tf, n, imp_t, gp)
+            create_zone(zones, is_supply, top, btm, lt, slot, atr_tf, n, imp_t, gp, false)
 
 // Oppositional structure covers the whole directional move out of the zone, not just the impulse candle:
 // until the zone's first retest, any close through an opposing zone of the same timeframe that already existed
@@ -525,7 +533,7 @@ resolve_turns(int slot, bool is_supply, array<Zone> zones, float yard_h, float t
                                     break
                         if in_window and at_extreme and not dead
                             int before = zones.size()
-                            create_zone(zones, is_supply, lb.get_top(), lb.get_bottom(), lz.lt, slot, yard_h, lz.base_n, t1, lz.gap)
+                            create_zone(zones, is_supply, lb.get_top(), lb.get_bottom(), lz.lt, slot, yard_h, lz.base_n, t1, lz.gap, true)
                             if zones.size() > before
                                 Zone pz = zones.get(0)
                                 pz.via_lower := true

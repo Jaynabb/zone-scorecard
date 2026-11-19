@@ -160,8 +160,12 @@ detect(bool is_supply, int k, float yard) =>
     float t_ext = na
     float body = math.abs(close[k] - open[k])
     bool away = is_supply ? close[k] < open[k] : close[k] > open[k]
-    if not na(body) and body >= lim and away
-        float base_lim = body * base_mult
+    // a gap between this candle and the one before it is part of the impulse: price left the base without trading
+    // there, so the gap counts as impulsive movement (the sheet's rule) and a gap alone can be the impulse
+    float gap_in = is_supply ? math.max(low[k + 1] - high[k], 0.0) : math.max(low[k] - high[k + 1], 0.0)
+    float drive = body + nz(gap_in)
+    if not na(body) and drive >= lim and (away or gap_in > 0)
+        float base_lim = drive * base_mult
         float a_lo = na   // full range of the first base candle, the one next to the impulse
         float a_hi = na
         float w_lo = na   // running wick extremes of the base
@@ -173,10 +177,12 @@ detect(bool is_supply, int k, float yard) =>
             float bl = math.min(open[off], close[off])
             if na(bd) or bd > base_lim
                 break
+            // a true gap between two base candles ends the base: only the candles on the impulse side of the gap are
+            // the zone (gap refined), as the sheet draws it. The gap itself is impulsive movement, not base
+            if cnt > 0 and (high[off] < low[off - 1] or low[off] > high[off - 1])
+                gap_cut := true
+                break
             if cnt > 0 and (bh < a_lo or bl > a_hi)
-                // the next candle does not share price with the first base candle: a gap in the base. Only the candles
-                // on the impulse side of it are the zone (gap refined), as the sheet draws it
-                gap_cut := high[off] < low[off - 1] or low[off] > high[off - 1]
                 break
             if cnt == 0
                 a_lo := low[off]

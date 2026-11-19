@@ -169,16 +169,6 @@ detect(bool is_supply, int k, float yard) =>
     float gap_in = is_supply ? math.max(prev_btm - open[k], 0.0) : math.max(open[k] - prev_top, 0.0)
     bool gap_imp = gap_in > 0
     float drive = body + nz(gap_in)
-    // the impulse is the whole directional run out of the base: this candle plus every later candle that keeps
-    // closing further away, with the gaps between them. That is the sheet's "entire directional movement out of
-    // the zone", so a base candle is judged against the full leg, not just the first candle of it
-    if k > 1
-        for i = k - 1 to 1
-            bool onward = is_supply ? close[i] < close[i + 1] : close[i] > close[i + 1]
-            if not onward
-                break
-            float g = is_supply ? math.max(math.min(open[i + 1], close[i + 1]) - open[i], 0.0) : math.max(open[i] - math.max(open[i + 1], close[i + 1]), 0.0)
-            drive += math.abs(close[i] - open[i]) + g
     if not na(body) and drive >= lim and (away or gap_imp)
         float base_lim = drive * base_mult
         float a_lo = na   // full range of the first base candle, the one next to the impulse
@@ -211,13 +201,13 @@ detect(bool is_supply, int k, float yard) =>
             z_btm := is_supply ? (na(z_btm) ? bl : math.min(z_btm, bl)) : w_lo
             lt := time[off]
         // V-shaped turn: no small base, but the candle next to the impulse holds the extreme.
-        // That candle is the base on its own, wick to body, as long as the impulse clearly outsizes it
-        // (its body at most three quarters of the impulse drive, or one typical body). A candle as big as the
-        // impulse is a drive, not a base. This is how the sheet draws a one candle base at a V low or V high.
+        // That candle is the base on its own, wick to body, as long as the impulse (body plus any gap) is at
+        // least as big as it. A candle bigger than the impulse is a drive, not a base. This is how the sheet
+        // draws a one candle base at a V low or V high.
         if cnt == 0
             int off = k + 1
             bool holds_extreme = is_supply ? high[off] >= high[k] : low[off] <= low[k]
-            bool normal_size = gap_imp or math.abs(close[off] - open[off]) <= math.max(yard, drive * 0.75)
+            bool normal_size = gap_imp or math.abs(close[off] - open[off]) <= drive
             if not na(close[off]) and holds_extreme and normal_size
                 z_top := is_supply ? high[off] : math.max(open[off], close[off])
                 z_btm := is_supply ? math.min(open[off], close[off]) : low[off]

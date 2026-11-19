@@ -183,9 +183,10 @@ detect(bool is_supply, int k, float yard) =>
             // the candle a gap left behind is the base whatever its size: the gap itself is the proof of imbalance
             if na(bd) or (bd > base_lim and not (j == 1 and gap_imp))
                 break
-            // a true gap between two base candles ends the base: only the candles on the impulse side of the gap are
-            // the zone (gap refined), as the sheet draws it. The gap itself is impulsive movement, not base
-            if cnt > 0 and (high[off] < low[off - 1] or low[off] > high[off - 1])
+            // a gap between two base candles ends the base: only the candles on the impulse side of the gap are the
+            // zone (gap refined), as the sheet draws it. A gap is the later candle opening outside the earlier
+            // candle's body, the space you see between bodies on the chart. The gap itself is impulsive movement
+            if cnt > 0 and (open[off - 1] > math.max(open[off], close[off]) or open[off - 1] < math.min(open[off], close[off]))
                 gap_cut := true
                 break
             if cnt > 0 and (bh < a_lo or bl > a_hi)
@@ -403,7 +404,7 @@ create_zone(array<Zone> zones, bool is_supply, float z_top, float z_btm, int lef
     if ok and not from_lower and zones.size() > 0
         for i = zones.size() - 1 to 0
             Zone oz = zones.get(i)
-            if (oz.via_lower or oz.lt > left_time) and top >= oz.b.get_bottom() and btm <= oz.b.get_top()
+            if (oz.via_lower or oz.lt >= left_time) and top >= oz.b.get_bottom() and btm <= oz.b.get_top()
                 oz.b.delete()
                 zones.remove(i)
     if ok and not zones.overlaps(top, btm)

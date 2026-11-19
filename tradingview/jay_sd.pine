@@ -71,6 +71,7 @@ int width_d = input.int(30, 'Low TF Zone Width (bars)', minval=2, group=visual_g
 int width_w = input.int(60, 'Mid TF Zone Width (bars)', minval=2, group=visual_group)
 int width_m = input.int(90, 'High TF Zone Width (bars)', minval=2, group=visual_group)
 bool anchor_base = input.bool(true, 'Anchor Zones To Their Base Candle', group=visual_group, tooltip='On: each zone starts at the base candle it was built from, like the original drawing. Off: zones use the widths above and end at the right margin.')
+color go_color = input.color(#2ECC71, 'Go Label Color', group=visual_group, tooltip='The target label turns this color when the trade is a go: score at or above the valid score, and price is retesting the zone now (or the impulse gapped away from the base, the one case that needs no retest).')
 color highlight_color = input.color(color.white, 'Nearest Zone Outline', group=visual_group)
 int target_tr = input.int(40, 'Target Zone Fill Transparency', minval=0, maxval=100, group=visual_group, tooltip='The two target zones (white outline) use this fill transparency instead of their timeframe value, so they stand out boldly.')
 color label_color = input.color(color.white, 'Text Color', group=visual_group)
@@ -98,6 +99,7 @@ type Zone
     bool via_lower = false // zone drawn from the base seen one timeframe below, inside a higher timeframe turn with no clean base
     float ext = na        // furthest price the move out reached before the first retest
     bool gap = false      // the base walk stopped at a price gap, so the zone covers only the candles on the impulse side of it
+    bool gap_out = false  // the impulse opened away from the base with a gap: the one case where the trade is a go before any retest
     float chk = na        // drill-down only: the furthest close of this timeframe seen between the base and the turn (for checking the rule)
 
 // slot 0 = Daily, 1 = Weekly, 2 = Monthly
@@ -220,7 +222,7 @@ detect(bool is_supply, int k, float yard) =>
             t_t0 := na(time[k + 2]) ? time[k + 1] : time[k + 2]
             t_t1 := time_close[k]
             t_ext := is_supply ? math.max(high[k], nz(high[k + 1], high[k])) : math.min(low[k], nz(low[k + 1], low[k]))
-    [found, z_top, z_btm, lt, cnt, time[k], turn, t_t0, t_t1, t_ext, gap_cut]
+    [found, z_top, z_btm, lt, cnt, time[k], turn, t_t0, t_t1, t_ext, gap_cut, gap_imp]
 
 // True when price travelled at least dep_mult x zone height beyond the zone edge over the k closed candles starting at the impulse.
 departs(bool is_supply, int k, float top, float btm, float yard) =>
@@ -237,10 +239,10 @@ departs(bool is_supply, int k, float top, float btm, float yard) =>
 // One candidate per side per bar: an impulse that closed last bar and already departed far enough,
 // otherwise an impulse dep_bars ago whose follow-through has now departed far enough.
 candidate(bool is_supply, float yard) =>
-    [f1, t1, b1, l1, n1, i1, tn1, a1, c1, x1, g1] = detect(is_supply, 1, yard)
+    [f1, t1, b1, l1, n1, i1, tn1, a1, c1, x1, g1, o1] = detect(is_supply, 1, yard)
     bool dep1 = departs(is_supply, 1, t1, b1, yard)
     bool ok1 = f1 and (not use_departure or dep1)
-    [f2, t2, b2, l2, n2, i2, tn2, a2, c2, x2, g2] = detect(is_supply, dep_bars, yard)
+    [f2, t2, b2, l2, n2, i2, tn2, a2, c2, x2, g2, o2] = detect(is_supply, dep_bars, yard)
     bool dep2 = departs(is_supply, dep_bars, t2, b2, yard)
     bool ok2 = f2 and (not use_departure or dep2)
     // a zone found late (impulse dep_bars ago) is dead on arrival if any candle since the impulse closed through its far edge
@@ -256,6 +258,7 @@ candidate(bool is_supply, float yard) =>
     int n = ok1 ? n1 : n2
     int it = ok1 ? i1 : i2
     bool gp = ok1 ? g1 : g2
+    bool go = ok1 ? o1 : o2
     // a turn with no clean base counts only once price has departed from the extreme like a zone would
     bool td1 = tn1 and (not use_departure or departs(is_supply, 1, is_supply ? x1 : x1 + yard, is_supply ? x1 - yard : x1, yard))
     bool td2 = tn2 and (not use_departure or departs(is_supply, dep_bars, is_supply ? x2 : x2 + yard, is_supply ? x2 - yard : x2, yard))
@@ -263,14 +266,14 @@ candidate(bool is_supply, float yard) =>
     int tt0 = td1 ? a1 : a2
     int tt1 = td1 ? c1 : c2
     float tx = td1 ? x1 : x2
-    [found, top, btm, lt, n, it, turn, tt0, tt1, tx, gp]
+    [found, top, btm, lt, n, it, turn, tt0, tt1, tx, gp, go]
 
 // Everything a timeframe reports each bar.
 tf_pack() =>
     float yard = ta.median(math.abs(close - open), typ_len)
-    [s_f, s_top, s_btm, s_t, s_n, s_i, s_tn, s_a, s_c, s_x, s_g] = candidate(true, yard)
-    [d_f, d_top, d_btm, d_t, d_n, d_i, d_tn, d_a, d_c, d_x, d_g] = candidate(false, yard)
-    [s_f, s_top, s_btm, s_t, s_n, s_i, d_f, d_top, d_btm, d_t, d_n, d_i, close, high, low, yard, s_tn, s_a, s_c, s_x, d_tn, d_a, d_c, d_x, s_g, d_g]
+    [s_f, s_top, s_btm, s_t, s_n, s_i, s_tn, s_a, s_c, s_x, s_g, s_o] = candidate(true, yard)
+    [d_f, d_top, d_btm, d_t, d_n, d_i, d_tn, d_a, d_c, d_x, d_g, d_o] = candidate(false, yard)
+    [s_f, s_top, s_btm, s_t, s_n, s_i, d_f, d_top, d_btm, d_t, d_n, d_i, close, high, low, yard, s_tn, s_a, s_c, s_x, d_tn, d_a, d_c, d_x, s_g, d_g, s_o, d_o]
 
 //-----------------------------------------------------------------------------
 // DATA REQUESTS
@@ -290,12 +293,12 @@ string tf_w_lo = mode_w == 2 ? TF1 : timeframe.period
 int lo_bars_d = timeframe.in_seconds(TF0) < chart_sec ? 100000 : 5
 int lo_bars_w = timeframe.in_seconds(TF1) < chart_sec ? 100000 : 5
 
-[d_sf, d_st, d_sb, d_stm, d_sn, d_si, d_df, d_dt, d_db, d_dtm, d_dn, d_di, d_c, d_h, d_l, d_a, d_stn, d_st0, d_st1, d_stx, d_dtn, d_dt0, d_dt1, d_dtx, d_sg, d_dg] = request.security(syminfo.tickerid, tf_d_hi, tf_pack())
-[w_sf, w_st, w_sb, w_stm, w_sn, w_si, w_df, w_dt, w_db, w_dtm, w_dn, w_di, w_c, w_h, w_l, w_a, w_stn, w_st0, w_st1, w_stx, w_dtn, w_dt0, w_dt1, w_dtx, w_sg, w_dg] = request.security(syminfo.tickerid, tf_w_hi, tf_pack())
-[m_sf, m_st, m_sb, m_stm, m_sn, m_si, m_df, m_dt, m_db, m_dtm, m_dn, m_di, m_c, m_h, m_l, m_a, m_stn, m_st0, m_st1, m_stx, m_dtn, m_dt0, m_dt1, m_dtx, m_sg, m_dg] = request.security(syminfo.tickerid, tf_m_hi, tf_pack())
+[d_sf, d_st, d_sb, d_stm, d_sn, d_si, d_df, d_dt, d_db, d_dtm, d_dn, d_di, d_c, d_h, d_l, d_a, d_stn, d_st0, d_st1, d_stx, d_dtn, d_dt0, d_dt1, d_dtx, d_sg, d_dg, d_so, d_do] = request.security(syminfo.tickerid, tf_d_hi, tf_pack())
+[w_sf, w_st, w_sb, w_stm, w_sn, w_si, w_df, w_dt, w_db, w_dtm, w_dn, w_di, w_c, w_h, w_l, w_a, w_stn, w_st0, w_st1, w_stx, w_dtn, w_dt0, w_dt1, w_dtx, w_sg, w_dg, w_so, w_do] = request.security(syminfo.tickerid, tf_w_hi, tf_pack())
+[m_sf, m_st, m_sb, m_stm, m_sn, m_si, m_df, m_dt, m_db, m_dtm, m_dn, m_di, m_c, m_h, m_l, m_a, m_stn, m_st0, m_st1, m_stx, m_dtn, m_dt0, m_dt1, m_dtx, m_sg, m_dg, m_so, m_do] = request.security(syminfo.tickerid, tf_m_hi, tf_pack())
 
-[d_sf_a, d_st_a, d_sb_a, d_stm_a, d_sn_a, d_si_a, d_df_a, d_dt_a, d_db_a, d_dtm_a, d_dn_a, d_di_a, d_c_a, d_h_a, d_l_a, d_a_a, d_stn_a, d_st0_a, d_st1_a, d_stx_a, d_dtn_a, d_dt0_a, d_dt1_a, d_dtx_a, d_sg_a, d_dg_a] = request.security_lower_tf(syminfo.tickerid, tf_d_lo, tf_pack(), calc_bars_count=lo_bars_d)
-[w_sf_a, w_st_a, w_sb_a, w_stm_a, w_sn_a, w_si_a, w_df_a, w_dt_a, w_db_a, w_dtm_a, w_dn_a, w_di_a, w_c_a, w_h_a, w_l_a, w_a_a, w_stn_a, w_st0_a, w_st1_a, w_stx_a, w_dtn_a, w_dt0_a, w_dt1_a, w_dtx_a, w_sg_a, w_dg_a] = request.security_lower_tf(syminfo.tickerid, tf_w_lo, tf_pack(), calc_bars_count=lo_bars_w)
+[d_sf_a, d_st_a, d_sb_a, d_stm_a, d_sn_a, d_si_a, d_df_a, d_dt_a, d_db_a, d_dtm_a, d_dn_a, d_di_a, d_c_a, d_h_a, d_l_a, d_a_a, d_stn_a, d_st0_a, d_st1_a, d_stx_a, d_dtn_a, d_dt0_a, d_dt1_a, d_dtx_a, d_sg_a, d_dg_a, d_so_a, d_do_a] = request.security_lower_tf(syminfo.tickerid, tf_d_lo, tf_pack(), calc_bars_count=lo_bars_d)
+[w_sf_a, w_st_a, w_sb_a, w_stm_a, w_sn_a, w_si_a, w_df_a, w_dt_a, w_db_a, w_dtm_a, w_dn_a, w_di_a, w_c_a, w_h_a, w_l_a, w_a_a, w_stn_a, w_st0_a, w_st1_a, w_stx_a, w_dtn_a, w_dt0_a, w_dt1_a, w_dtx_a, w_sg_a, w_dg_a, w_so_a, w_do_a] = request.security_lower_tf(syminfo.tickerid, tf_w_lo, tf_pack(), calc_bars_count=lo_bars_w)
 
 //-----------------------------------------------------------------------------
 // ZONE FUNCTIONS
@@ -341,19 +344,19 @@ backing(int slot, bool is_supply, box b) =>
 
 // Label text: timeframe, side, price range, TARGET, higher timeframe backing, then the facts the scorer needs:
 // base candle count, retest count with the deepest retest as a share of the zone, and oppositional structure.
-zone_text(int slot, bool is_supply, Zone z, string tag, string extra) =>
+zone_text(int slot, bool is_supply, Zone z, string tag, string extra, string status) =>
     [w, tr, nm] = zone_style(slot)
     box b = z.b
     // three short lines keep the label narrow enough to clear the price axis
     string facts = "base " + str.tostring(z.base_n) + " | touches " + str.tostring(z.touches) + (z.touches > 0 ? " (" + str.tostring(math.round(z.depth * 100)) + "% deep)" : "") + " | OS " + (z.os ? "yes" : "no") + (z.gap ? " | gap refined" : "") + (z.via_lower ? " | base read on " + tf_name(slot == 2 ? TF1 : TF0) : "")
-    nm + (is_supply ? " SUPPLY" : " DEMAND") + " " + str.tostring(b.get_bottom(), format.mintick) + " - " + str.tostring(b.get_top(), format.mintick) + "\nTARGET" + tag + "\n" + facts + (extra != "" ? "\n" + extra : "")
+    nm + (is_supply ? " SUPPLY" : " DEMAND") + " " + str.tostring(b.get_bottom(), format.mintick) + " - " + str.tostring(b.get_top(), format.mintick) + "\nTARGET" + tag + (status == "" ? "" : " | " + status) + "\n" + facts + (extra != "" ? "\n" + extra : "")
 
 // Puts the target label in the empty space to the right of the last candle, where no candle can cover it.
-mark_target(int slot, bool is_supply, Zone z, string tag, string extra) =>
+mark_target(int slot, bool is_supply, Zone z, string tag, string extra, string status, bool go) =>
     box b = z.b
     float mid = (b.get_top() + b.get_bottom()) / 2
-    // just outside the box's right end, extending into the right margin
-    label l = label.new(bar_index + 6, mid, zone_text(slot, is_supply, z, tag, extra), xloc=xloc.bar_index, style=label.style_label_left, color=highlight_color, textcolor=color.black, size=size.small)
+    // just outside the box's right end, extending into the right margin. Green when the trade is a go
+    label l = label.new(bar_index + 6, mid, zone_text(slot, is_supply, z, tag, extra, status), xloc=xloc.bar_index, style=label.style_label_left, color=go ? go_color : highlight_color, textcolor=color.black, size=size.small)
     tgt_labels.push(l)
 
 method trim(array<Zone> zones, int limit) =>
@@ -389,7 +392,7 @@ broke_opposing(int slot, bool is_supply, int left_time, int imp_t) =>
 // z_top, z_btm = zone edges from the base
 // yard_tf = typical (median) candle body of the zone's own timeframe
 // n = number of base candles, imp_t = time of the impulse candle
-create_zone(array<Zone> zones, bool is_supply, float z_top, float z_btm, int left_time, int slot, float yard_tf, int n, int imp_t, bool gp, bool from_lower) =>
+create_zone(array<Zone> zones, bool is_supply, float z_top, float z_btm, int left_time, int slot, float yard_tf, int n, int imp_t, bool gp, bool go, bool from_lower) =>
     float buffer = yard_tf * box_width
     bool flat = na(z_top) or na(z_btm) or (z_top - z_btm) <= syminfo.mintick
     float anchor = is_supply ? z_top : z_btm
@@ -418,6 +421,7 @@ create_zone(array<Zone> zones, bool is_supply, float z_top, float z_btm, int lef
         z.base_n := n
         z.lt := left_time
         z.gap := gp
+        z.gap_out := go
         z.os := broke_opposing(slot, is_supply, left_time, imp_t)
         zones.unshift(z)
         zones.trim(max_zones)
@@ -473,14 +477,14 @@ monitor(array<Zone> zones, bool is_supply, int slot, float c, float h, float l) 
                 zones.remove(i)
 
 // Adds a reported base as a zone once, keyed by its leftmost candle time.
-add_once(array<Zone> zones, bool is_supply, int slot, bool found, float top, float btm, int lt, int n, int imp_t, float atr_tf, bool gp) =>
+add_once(array<Zone> zones, bool is_supply, int slot, bool found, float top, float btm, int lt, int n, int imp_t, float atr_tf, bool gp, bool go) =>
     if found and not na(lt)
         int key = lt * 8 + slot * 2 + (is_supply ? 0 : 1)
         if seen_keys.indexof(key) < 0
             seen_keys.unshift(key)
             if seen_keys.size() > 400
                 seen_keys.pop()
-            create_zone(zones, is_supply, top, btm, lt, slot, atr_tf, n, imp_t, gp, false)
+            create_zone(zones, is_supply, top, btm, lt, slot, atr_tf, n, imp_t, gp, go, false)
 
 // Oppositional structure covers the whole directional move out of the zone, not just the impulse candle:
 // until the zone's first retest, any close through an opposing zone of the same timeframe that already existed
@@ -545,7 +549,7 @@ resolve_turns(int slot, bool is_supply, array<Zone> zones, float yard_h, float t
                                     break
                         if in_window and at_extreme and not dead
                             int before = zones.size()
-                            create_zone(zones, is_supply, lb.get_top(), lb.get_bottom(), lz.lt, slot, yard_h, lz.base_n, t1, lz.gap, true)
+                            create_zone(zones, is_supply, lb.get_top(), lb.get_bottom(), lz.lt, slot, yard_h, lz.base_n, t1, lz.gap, lz.gap_out, true)
                             if zones.size() > before
                                 Zone pz = zones.get(0)
                                 pz.via_lower := true
@@ -558,21 +562,21 @@ resolve_turns(int slot, bool is_supply, array<Zone> zones, float yard_h, float t
                     pt_t1.remove(i)
                     pt_ext.remove(i)
 
-process_slot(int slot, int mode, bool show, array<Zone> sup, array<Zone> dem, bool h_sf, float h_st, float h_sb, int h_stm, int h_sn, int h_si, bool h_df, float h_dt, float h_db, int h_dtm, int h_dn, int h_di, float h_c, float h_h, float h_l, float h_a, array<bool> l_sf, array<float> l_st, array<float> l_sb, array<int> l_stm, array<int> l_sn, array<int> l_si, array<bool> l_df, array<float> l_dt, array<float> l_db, array<int> l_dtm, array<int> l_dn, array<int> l_di, array<float> l_c, array<float> l_h, array<float> l_l, array<float> l_a, bool h_stn, int h_st0, int h_st1, float h_stx, bool h_dtn, int h_dt0, int h_dt1, float h_dtx, bool h_sg, bool h_dg, array<bool> l_sg, array<bool> l_dg) =>
+process_slot(int slot, int mode, bool show, array<Zone> sup, array<Zone> dem, bool h_sf, float h_st, float h_sb, int h_stm, int h_sn, int h_si, bool h_df, float h_dt, float h_db, int h_dtm, int h_dn, int h_di, float h_c, float h_h, float h_l, float h_a, array<bool> l_sf, array<float> l_st, array<float> l_sb, array<int> l_stm, array<int> l_sn, array<int> l_si, array<bool> l_df, array<float> l_dt, array<float> l_db, array<int> l_dtm, array<int> l_dn, array<int> l_di, array<float> l_c, array<float> l_h, array<float> l_l, array<float> l_a, bool h_stn, int h_st0, int h_st1, float h_stx, bool h_dtn, int h_dt0, int h_dt1, float h_dtx, bool h_sg, bool h_dg, array<bool> l_sg, array<bool> l_dg, bool h_so, bool h_do, array<bool> l_so, array<bool> l_do) =>
     if show
         if mode == 2
             if l_c.size() > 0
                 for i = 0 to l_c.size() - 1
-                    add_once(sup, true, slot, l_sf.get(i), l_st.get(i), l_sb.get(i), l_stm.get(i), l_sn.get(i), l_si.get(i), l_a.get(i), l_sg.get(i))
-                    add_once(dem, false, slot, l_df.get(i), l_dt.get(i), l_db.get(i), l_dtm.get(i), l_dn.get(i), l_di.get(i), l_a.get(i), l_dg.get(i))
+                    add_once(sup, true, slot, l_sf.get(i), l_st.get(i), l_sb.get(i), l_stm.get(i), l_sn.get(i), l_si.get(i), l_a.get(i), l_sg.get(i), l_so.get(i))
+                    add_once(dem, false, slot, l_df.get(i), l_dt.get(i), l_db.get(i), l_dtm.get(i), l_dn.get(i), l_di.get(i), l_a.get(i), l_dg.get(i), l_do.get(i))
                     monitor(sup, true, slot, l_c.get(i), l_h.get(i), l_l.get(i))
                     monitor(dem, false, slot, l_c.get(i), l_h.get(i), l_l.get(i))
                 sup.update_os(true, slot)
                 dem.update_os(false, slot)
             0
         else
-            add_once(sup, true, slot, h_sf, h_st, h_sb, h_stm, h_sn, h_si, h_a, h_sg)
-            add_once(dem, false, slot, h_df, h_dt, h_db, h_dtm, h_dn, h_di, h_a, h_dg)
+            add_once(sup, true, slot, h_sf, h_st, h_sb, h_stm, h_sn, h_si, h_a, h_sg, h_so)
+            add_once(dem, false, slot, h_df, h_dt, h_db, h_dtm, h_dn, h_di, h_a, h_dg, h_do)
             monitor(sup, true, slot, h_c, h_h, h_l)
             monitor(dem, false, slot, h_c, h_h, h_l)
             sup.update_os(true, slot)
@@ -672,10 +676,10 @@ refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<bo
 //-----------------------------------------------------------------------------
 // MAIN LOGIC
 //-----------------------------------------------------------------------------
-process_slot(0, mode_d, show_d, sup_d, dem_d, d_sf, d_st, d_sb, d_stm, d_sn, d_si, d_df, d_dt, d_db, d_dtm, d_dn, d_di, d_c, d_h, d_l, d_a, d_sf_a, d_st_a, d_sb_a, d_stm_a, d_sn_a, d_si_a, d_df_a, d_dt_a, d_db_a, d_dtm_a, d_dn_a, d_di_a, d_c_a, d_h_a, d_l_a, d_a_a, d_stn, d_st0, d_st1, d_stx, d_dtn, d_dt0, d_dt1, d_dtx, d_sg, d_dg, d_sg_a, d_dg_a)
-process_slot(1, mode_w, show_w, sup_w, dem_w, w_sf, w_st, w_sb, w_stm, w_sn, w_si, w_df, w_dt, w_db, w_dtm, w_dn, w_di, w_c, w_h, w_l, w_a, w_sf_a, w_st_a, w_sb_a, w_stm_a, w_sn_a, w_si_a, w_df_a, w_dt_a, w_db_a, w_dtm_a, w_dn_a, w_di_a, w_c_a, w_h_a, w_l_a, w_a_a, w_stn, w_st0, w_st1, w_stx, w_dtn, w_dt0, w_dt1, w_dtx, w_sg, w_dg, w_sg_a, w_dg_a)
+process_slot(0, mode_d, show_d, sup_d, dem_d, d_sf, d_st, d_sb, d_stm, d_sn, d_si, d_df, d_dt, d_db, d_dtm, d_dn, d_di, d_c, d_h, d_l, d_a, d_sf_a, d_st_a, d_sb_a, d_stm_a, d_sn_a, d_si_a, d_df_a, d_dt_a, d_db_a, d_dtm_a, d_dn_a, d_di_a, d_c_a, d_h_a, d_l_a, d_a_a, d_stn, d_st0, d_st1, d_stx, d_dtn, d_dt0, d_dt1, d_dtx, d_sg, d_dg, d_sg_a, d_dg_a, d_so, d_do, d_so_a, d_do_a)
+process_slot(1, mode_w, show_w, sup_w, dem_w, w_sf, w_st, w_sb, w_stm, w_sn, w_si, w_df, w_dt, w_db, w_dtm, w_dn, w_di, w_c, w_h, w_l, w_a, w_sf_a, w_st_a, w_sb_a, w_stm_a, w_sn_a, w_si_a, w_df_a, w_dt_a, w_db_a, w_dtm_a, w_dn_a, w_di_a, w_c_a, w_h_a, w_l_a, w_a_a, w_stn, w_st0, w_st1, w_stx, w_dtn, w_dt0, w_dt1, w_dtx, w_sg, w_dg, w_sg_a, w_dg_a, w_so, w_do, w_so_a, w_do_a)
 // Monthly is never lower than a Daily or Weekly chart, so it reuses the Weekly lower-tf arrays, which are ignored unless mode is 2
-process_slot(2, mode_m, show_m, sup_m, dem_m, m_sf, m_st, m_sb, m_stm, m_sn, m_si, m_df, m_dt, m_db, m_dtm, m_dn, m_di, m_c, m_h, m_l, m_a, w_sf_a, w_st_a, w_sb_a, w_stm_a, w_sn_a, w_si_a, w_df_a, w_dt_a, w_db_a, w_dtm_a, w_dn_a, w_di_a, w_c_a, w_h_a, w_l_a, w_a_a, m_stn, m_st0, m_st1, m_stx, m_dtn, m_dt0, m_dt1, m_dtx, m_sg, m_dg, w_sg_a, w_dg_a)
+process_slot(2, mode_m, show_m, sup_m, dem_m, m_sf, m_st, m_sb, m_stm, m_sn, m_si, m_df, m_dt, m_db, m_dtm, m_dn, m_di, m_c, m_h, m_l, m_a, w_sf_a, w_st_a, w_sb_a, w_stm_a, w_sn_a, w_si_a, w_df_a, w_dt_a, w_db_a, w_dtm_a, w_dn_a, w_di_a, w_c_a, w_h_a, w_l_a, w_a_a, m_stn, m_st0, m_st1, m_stx, m_dtn, m_dt0, m_dt1, m_dtx, m_sg, m_dg, w_sg_a, w_dg_a, m_so, m_do, w_so_a, w_do_a)
 
 if barstate.islast
     // size the boxes once, on the last bar, so no box is ever positioned off the start of the chart
@@ -867,16 +871,24 @@ score_zone(Zone z, bool is_supply, float r_top, float r_btm, box opp, string opp
     int total = s_range + s_time + s_trend + s_move + s_os + s_pur + s_rrr
     [total, s_range, s_time, s_trend, s_move, s_os, s_pur, s_rrr, rrr, ratio, pos, opp_nm]
 
+// Entry timing, the sheet's rule: a trade is only taken on the retest of the zone, except when the impulse gapped away
+// from the base, which allows an entry before any retest. A go needs the score as well.
+entry_state(Zone z, int total) =>
+    bool valid = total >= alert_min
+    bool go = valid and (z.inside or (z.gap_out and z.touches == 0))
+    string st = not valid ? "NO (score under " + str.tostring(alert_min) + ")" : z.inside ? "GO (retest now)" : (z.gap_out and z.touches == 0) ? "GO (gap away, no retest needed)" : "WAIT FOR RETEST"
+    [go, st]
+
 score_line(int total, int s_range, int s_time, int s_trend, int s_move, int s_os, int s_pur, int s_rrr, float rrr, float ratio, float pos, string opp_nm) =>
     "SCORE " + str.tostring(total) + "/20 | range " + (na(pos) ? "? (no HTF zones)" : str.tostring(s_range)) + " | time " + str.tostring(s_time) + " | trend " + str.tostring(s_trend) + " | move " + str.tostring(s_move) + (na(ratio) ? "" : " (" + str.tostring(ratio, "#.#") + "x)") + " | OS " + str.tostring(s_os) + " | purity " + str.tostring(s_pur) + " | rrr " + str.tostring(s_rrr) + (na(rrr) ? " (no opposing zone)" : " (" + str.tostring(rrr, "#.#") + ":1" + (opp_nm == "" ? "" : " to " + opp_nm) + ")")
 
 num(float x) =>
     na(x) ? "null" : str.tostring(x, "#.####")
 
-setup_json(Zone z, bool is_supply, int slot, string tag, int total, int s_range, int s_time, int s_trend, int s_move, int s_os, int s_pur, int s_rrr, float rrr, float ratio, float pos, string opp_nm) =>
+setup_json(Zone z, bool is_supply, int slot, string tag, int total, int s_range, int s_time, int s_trend, int s_move, int s_os, int s_pur, int s_rrr, float rrr, float ratio, float pos, string opp_nm, bool go, string status) =>
     box b = z.b
     [w, tr, nm] = zone_style(slot)
-    '{"side":"' + (is_supply ? "SELL" : "BUY") + '","zone":"' + nm + (is_supply ? " SUPPLY " : " DEMAND ") + str.tostring(b.get_bottom(), format.mintick) + " - " + str.tostring(b.get_top(), format.mintick) + '","top":' + num(b.get_top()) + ',"btm":' + num(b.get_bottom()) + ',"backing":"' + str.trim(tag) + '","base":' + str.tostring(z.base_n) + ',"touches":' + str.tostring(z.touches) + ',"depth":' + num(z.depth) + ',"os":' + (z.os ? "true" : "false") + ',"gap":' + (z.gap ? "true" : "false") + ',"score":' + str.tostring(total) + ',"checks":{"range":' + str.tostring(s_range) + ',"time":' + str.tostring(s_time) + ',"trend":' + str.tostring(s_trend) + ',"move":' + str.tostring(s_move) + ',"os":' + str.tostring(s_os) + ',"purity":' + str.tostring(s_pur) + ',"rrr":' + str.tostring(s_rrr) + '},"rrr_ratio":' + num(rrr) + ',"rrr_target":"' + opp_nm + '"' + ',"move_ratio":' + num(ratio) + ',"range_pos":' + num(pos) + '}'
+    '{"side":"' + (is_supply ? "SELL" : "BUY") + '","zone":"' + nm + (is_supply ? " SUPPLY " : " DEMAND ") + str.tostring(b.get_bottom(), format.mintick) + " - " + str.tostring(b.get_top(), format.mintick) + '","top":' + num(b.get_top()) + ',"btm":' + num(b.get_bottom()) + ',"backing":"' + str.trim(tag) + '","base":' + str.tostring(z.base_n) + ',"touches":' + str.tostring(z.touches) + ',"depth":' + num(z.depth) + ',"os":' + (z.os ? "true" : "false") + ',"gap":' + (z.gap ? "true" : "false") + ',"score":' + str.tostring(total) + ',"checks":{"range":' + str.tostring(s_range) + ',"time":' + str.tostring(s_time) + ',"trend":' + str.tostring(s_trend) + ',"move":' + str.tostring(s_move) + ',"os":' + str.tostring(s_os) + ',"purity":' + str.tostring(s_pur) + ',"rrr":' + str.tostring(s_rrr) + '},"rrr_ratio":' + num(rrr) + ',"rrr_target":"' + opp_nm + '","gap_out":' + (z.gap_out ? "true" : "false") + ',"go":' + (go ? "true" : "false") + ',"entry":"' + status + '"' + ',"move_ratio":' + num(ratio) + ',"range_pos":' + num(pos) + '}'
 
 // approach: how far price has travelled between the two target zones toward the one ahead
 var float prog_prev = na
@@ -918,8 +930,9 @@ if barstate.islast
             if na(opp)
                 opp_nm := ""
         [tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm] = score_zone(tgt_sup, true, r_top, r_btm, opp, opp_nm)
-        mark_target(tgt_sup_slot, true, tgt_sup, tgt_sup_tag, show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm) : "")
-        s_json := setup_json(tgt_sup, true, tgt_sup_slot, tgt_sup_tag, tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm)
+        [s_go, s_st] = entry_state(tgt_sup, tot)
+        mark_target(tgt_sup_slot, true, tgt_sup, tgt_sup_tag, show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm) : "", s_st, s_go)
+        s_json := setup_json(tgt_sup, true, tgt_sup_slot, tgt_sup_tag, tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, s_go, s_st)
     if not na(tgt_dem)
         box opp = na
         string opp_nm = ""
@@ -934,8 +947,9 @@ if barstate.islast
             if na(opp)
                 opp_nm := ""
         [tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm] = score_zone(tgt_dem, false, r_top, r_btm, opp, opp_nm)
-        mark_target(tgt_dem_slot, false, tgt_dem, tgt_dem_tag, show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm) : "")
-        d_json := setup_json(tgt_dem, false, tgt_dem_slot, tgt_dem_tag, tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm)
+        [d_go, d_st] = entry_state(tgt_dem, tot)
+        mark_target(tgt_dem_slot, false, tgt_dem, tgt_dem_tag, show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm) : "", d_st, d_go)
+        d_json := setup_json(tgt_dem, false, tgt_dem_slot, tgt_dem_tag, tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, d_go, d_st)
     if not na(tgt_sup) and not na(tgt_dem)
         float s_edge = tgt_sup.b.get_bottom()
         float d_edge = tgt_dem.b.get_top()

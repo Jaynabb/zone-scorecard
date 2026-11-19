@@ -826,16 +826,23 @@ nearest_zone_box(array<Zone> zones, bool is_supply) =>
                 best := b
     best
 
+// The automatic range: 100% at the middle of the nearest High timeframe supply above price, 0% at the middle of the
+// nearest High timeframe demand below. When a side has no High timeframe zone (a market at its highs or lows), the
+// nearest Mid timeframe zone on that side stands in, even on a chart where Mid zones are not drawn.
 range_levels() =>
     box s = nearest_zone_box(sup_m, true)
     box d = nearest_zone_box(dem_m, false)
+    string s_nm = tf_name(TF2)
+    string d_nm = tf_name(TF2)
     if na(s)
         s := nearest_zone_box(sup_w, true)
+        s_nm := tf_name(TF1)
     if na(d)
         d := nearest_zone_box(dem_w, false)
+        d_nm := tf_name(TF1)
     float top = na(s) ? na : (s.get_top() + s.get_bottom()) / 2
     float btm = na(d) ? na : (d.get_top() + d.get_bottom()) / 2
-    [top, btm]
+    [top, btm, s_nm, d_nm]
 
 // Returns [total, range, time, trend, move, os, purity, rrr, rrr_ratio, move_ratio, range_pos]
 score_zone(Zone z, bool is_supply, float r_top, float r_btm, box opp, string opp_nm) =>
@@ -879,8 +886,8 @@ entry_state(Zone z, int total) =>
     string st = not valid ? "NO (score under " + str.tostring(alert_min) + ")" : z.inside ? "GO (retest now)" : (z.gap_out and z.touches == 0) ? "GO (gap away, no retest needed)" : "WAIT FOR RETEST"
     [go, st]
 
-score_line(int total, int s_range, int s_time, int s_trend, int s_move, int s_os, int s_pur, int s_rrr, float rrr, float ratio, float pos, string opp_nm, float r_top, float r_btm) =>
-    "SCORE " + str.tostring(total) + "/20 | range " + (na(pos) ? "? (no HTF zones)" : str.tostring(s_range) + (show_zone_info ? " (" + str.tostring(math.round(pos * 100)) + "% of " + str.tostring(r_btm, format.mintick) + " to " + str.tostring(r_top, format.mintick) + ")" : "")) + " | time " + str.tostring(s_time) + " | trend " + str.tostring(s_trend) + " | move " + str.tostring(s_move) + (na(ratio) ? "" : " (" + str.tostring(ratio, "#.#") + "x)") + " | OS " + str.tostring(s_os) + " | purity " + str.tostring(s_pur) + " | rrr " + str.tostring(s_rrr) + (na(rrr) ? " (no opposing zone)" : " (" + str.tostring(rrr, "#.#") + ":1" + (opp_nm == "" ? "" : " to " + opp_nm) + ")")
+score_line(int total, int s_range, int s_time, int s_trend, int s_move, int s_os, int s_pur, int s_rrr, float rrr, float ratio, float pos, string opp_nm, float r_top, float r_btm, string r_top_nm, string r_btm_nm) =>
+    "SCORE " + str.tostring(total) + "/20 | range " + (na(pos) ? "? (no HTF zones)" : str.tostring(s_range) + (show_zone_info ? " (" + str.tostring(math.round(pos * 100)) + "% of " + str.tostring(r_btm, format.mintick) + " " + r_btm_nm + " to " + str.tostring(r_top, format.mintick) + " " + r_top_nm + ")" : "")) + " | time " + str.tostring(s_time) + " | trend " + str.tostring(s_trend) + " | move " + str.tostring(s_move) + (na(ratio) ? "" : " (" + str.tostring(ratio, "#.#") + "x)") + " | OS " + str.tostring(s_os) + " | purity " + str.tostring(s_pur) + " | rrr " + str.tostring(s_rrr) + (na(rrr) ? " (no opposing zone)" : " (" + str.tostring(rrr, "#.#") + ":1" + (opp_nm == "" ? "" : " to " + opp_nm) + ")")
 
 num(float x) =>
     na(x) ? "null" : str.tostring(x, "#.####")
@@ -910,7 +917,7 @@ if barstate.islast
                 tgt_dem := tgt_zones.get(i)
                 tgt_dem_tag := tgt_tags.get(i)
                 tgt_dem_slot := tgt_slots.get(i)
-    [r_top, r_btm] = range_levels()
+    [r_top, r_btm, r_top_nm, r_btm_nm] = range_levels()
     string s_json = ""
     string d_json = ""
     // The profit target for risk to reward is the next opposing zone in the way: the other Low timeframe target when
@@ -931,7 +938,7 @@ if barstate.islast
                 opp_nm := ""
         [tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm] = score_zone(tgt_sup, true, r_top, r_btm, opp, opp_nm)
         [s_go, s_ent] = entry_state(tgt_sup, tot)
-        mark_target(tgt_sup_slot, true, tgt_sup, tgt_sup_tag, show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, r_top, r_btm) : "", s_ent, s_go)
+        mark_target(tgt_sup_slot, true, tgt_sup, tgt_sup_tag, show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, r_top, r_btm, r_top_nm, r_btm_nm) : "", s_ent, s_go)
         s_json := setup_json(tgt_sup, true, tgt_sup_slot, tgt_sup_tag, tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, s_go, s_ent)
     if not na(tgt_dem)
         box opp = na
@@ -948,7 +955,7 @@ if barstate.islast
                 opp_nm := ""
         [tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm] = score_zone(tgt_dem, false, r_top, r_btm, opp, opp_nm)
         [d_go, d_ent] = entry_state(tgt_dem, tot)
-        mark_target(tgt_dem_slot, false, tgt_dem, tgt_dem_tag, show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, r_top, r_btm) : "", d_ent, d_go)
+        mark_target(tgt_dem_slot, false, tgt_dem, tgt_dem_tag, show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, r_top, r_btm, r_top_nm, r_btm_nm) : "", d_ent, d_go)
         d_json := setup_json(tgt_dem, false, tgt_dem_slot, tgt_dem_tag, tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, d_go, d_ent)
     if not na(tgt_sup) and not na(tgt_dem)
         float s_edge = tgt_sup.b.get_bottom()

@@ -98,6 +98,7 @@ type Zone
     bool via_lower = false // zone drawn from the base seen one timeframe below, inside a higher timeframe turn with no clean base
     float ext = na        // furthest price the move out reached before the first retest
     bool gap = false      // the base walk stopped at a price gap, so the zone covers only the candles on the impulse side of it
+    float chk = na        // drill-down only: the furthest close of this timeframe seen between the base and the turn (for checking the rule)
 
 // slot 0 = Daily, 1 = Weekly, 2 = Monthly
 var array<Zone> sup_d = array.new<Zone>()
@@ -386,7 +387,7 @@ create_zone(array<Zone> zones, bool is_supply, float z_top, float z_btm, int lef
     if ok and not zones.overlaps(top, btm)
         [w, tr, nm] = zone_style(slot)
         color base = zone_color(slot, is_supply)
-        box b = box.new(left_time, top, time, btm, xloc=xloc.bar_time, border_color=base, border_width=w, bgcolor=color.new(base, tr), text="", text_color=label_color, text_size=size.small, text_halign=text.align_right, text_valign=text.align_center, extend=extend.none)
+        box b = box.new(left_time, top, time, btm, xloc=xloc.bar_time, border_color=base, border_width=w, bgcolor=color.new(base, tr), text="", text_color=label_color, text_size=size.small, text_halign=slot == 0 ? text.align_right : slot == 1 ? text.align_center : text.align_left, text_valign=text.align_center, extend=extend.none)
         Zone z = Zone.new(b)
         z.base_n := n
         z.lt := left_time
@@ -507,10 +508,12 @@ resolve_turns(int slot, bool is_supply, array<Zone> zones, float yard_h, float t
                         bool at_extreme = is_supply ? lb.get_top() >= ext - yard_h : lb.get_bottom() <= ext + yard_h
                         // a candle of this timeframe that already closed through the base kills it before it is drawn
                         bool dead = false
+                        float far = na
                         if in_window and at_extreme
                             for q = 1 to 120
                                 if time_close[q] <= lz.lt
                                     break
+                                far := is_supply ? (na(far) ? tf_close[q] : math.max(far, tf_close[q])) : (na(far) ? tf_close[q] : math.min(far, tf_close[q]))
                                 if is_supply ? tf_close[q] > lb.get_top() : tf_close[q] < lb.get_bottom()
                                     dead := true
                                     break
@@ -520,6 +523,7 @@ resolve_turns(int slot, bool is_supply, array<Zone> zones, float yard_h, float t
                             if zones.size() > before
                                 Zone pz = zones.get(0)
                                 pz.via_lower := true
+                                pz.chk := far
                             done := true
                             break
                 if done or time > t1 + life
@@ -622,7 +626,7 @@ refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<bo
             b.set_bgcolor(color.new(base, is_target ? target_tr : tr))
             b.set_border_style(line.style_solid)
             string side_nm = nm + (is_supply ? " SUPPLY" : " DEMAND")
-            string info = side_nm + " " + str.tostring(b.get_bottom(), format.mintick) + " - " + str.tostring(b.get_top(), format.mintick) + " | base " + str.tostring(z.base_n) + " | " + str.format_time(z.lt, "yyyy-MM-dd") + (z.gap ? " | gap refined" : "") + (z.via_lower ? " | base read below" : "")
+            string info = side_nm + " " + str.tostring(b.get_bottom(), format.mintick) + " - " + str.tostring(b.get_top(), format.mintick) + " | base " + str.tostring(z.base_n) + " | " + str.format_time(z.lt, "yyyy-MM-dd") + (z.gap ? " | gap refined" : "") + (z.via_lower ? " | base read below" + (na(z.chk) ? "" : (is_supply ? " | highest close since base " : " | lowest close since base ") + str.tostring(z.chk, format.mintick)) : "")
             b.set_text(show_zone_info ? info : (is_target or label_targets_only ? "" : side_nm))
             if is_target
                 b.set_border_color(highlight_color)

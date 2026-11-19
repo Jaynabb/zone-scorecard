@@ -161,10 +161,15 @@ detect(bool is_supply, int k, float yard) =>
     float body = math.abs(close[k] - open[k])
     bool away = is_supply ? close[k] < open[k] : close[k] > open[k]
     // a gap between this candle and the one before it is part of the impulse: price left the base without trading
-    // there, so the gap counts as impulsive movement (the sheet's rule) and a gap alone can be the impulse
-    float gap_in = is_supply ? math.max(low[k + 1] - high[k], 0.0) : math.max(low[k] - high[k + 1], 0.0)
+    // there, so the gap counts as impulsive movement (the sheet's rule) and a gap alone can be the impulse.
+    // The gap is measured at the open against the previous candle's body, the way it shows on the chart; a wick
+    // that later dips back into the gap does not undo it
+    float prev_top = math.max(open[k + 1], close[k + 1])
+    float prev_btm = math.min(open[k + 1], close[k + 1])
+    float gap_in = is_supply ? math.max(prev_btm - open[k], 0.0) : math.max(open[k] - prev_top, 0.0)
+    bool gap_imp = gap_in > 0
     float drive = body + nz(gap_in)
-    if not na(body) and drive >= lim and (away or gap_in > 0)
+    if not na(body) and drive >= lim and (away or gap_imp)
         float base_lim = drive * base_mult
         float a_lo = na   // full range of the first base candle, the one next to the impulse
         float a_hi = na
@@ -175,7 +180,8 @@ detect(bool is_supply, int k, float yard) =>
             float bd = math.abs(close[off] - open[off])
             float bh = math.max(open[off], close[off])
             float bl = math.min(open[off], close[off])
-            if na(bd) or bd > base_lim
+            // the candle a gap left behind is the base whatever its size: the gap itself is the proof of imbalance
+            if na(bd) or (bd > base_lim and not (j == 1 and gap_imp))
                 break
             // a true gap between two base candles ends the base: only the candles on the impulse side of the gap are
             // the zone (gap refined), as the sheet draws it. The gap itself is impulsive movement, not base
@@ -200,7 +206,7 @@ detect(bool is_supply, int k, float yard) =>
         if cnt == 0
             int off = k + 1
             bool holds_extreme = is_supply ? high[off] >= high[k] : low[off] <= low[k]
-            bool normal_size = math.abs(close[off] - open[off]) <= math.max(yard, drive * 0.75)
+            bool normal_size = gap_imp or math.abs(close[off] - open[off]) <= math.max(yard, drive * 0.75)
             if not na(close[off]) and holds_extreme and normal_size
                 z_top := is_supply ? high[off] : math.max(open[off], close[off])
                 z_btm := is_supply ? math.min(open[off], close[off]) : low[off]

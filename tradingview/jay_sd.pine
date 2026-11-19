@@ -930,9 +930,9 @@ if barstate.islast
             if na(opp)
                 opp_nm := ""
         [tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm] = score_zone(tgt_sup, true, r_top, r_btm, opp, opp_nm)
-        [s_go, s_st] = entry_state(tgt_sup, tot)
-        mark_target(tgt_sup_slot, true, tgt_sup, tgt_sup_tag, show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm) : "", s_st, s_go)
-        s_json := setup_json(tgt_sup, true, tgt_sup_slot, tgt_sup_tag, tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, s_go, s_st)
+        [s_go, s_ent] = entry_state(tgt_sup, tot)
+        mark_target(tgt_sup_slot, true, tgt_sup, tgt_sup_tag, show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm) : "", s_ent, s_go)
+        s_json := setup_json(tgt_sup, true, tgt_sup_slot, tgt_sup_tag, tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, s_go, s_ent)
     if not na(tgt_dem)
         box opp = na
         string opp_nm = ""
@@ -947,9 +947,9 @@ if barstate.islast
             if na(opp)
                 opp_nm := ""
         [tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm] = score_zone(tgt_dem, false, r_top, r_btm, opp, opp_nm)
-        [d_go, d_st] = entry_state(tgt_dem, tot)
-        mark_target(tgt_dem_slot, false, tgt_dem, tgt_dem_tag, show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm) : "", d_st, d_go)
-        d_json := setup_json(tgt_dem, false, tgt_dem_slot, tgt_dem_tag, tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, d_go, d_st)
+        [d_go, d_ent] = entry_state(tgt_dem, tot)
+        mark_target(tgt_dem_slot, false, tgt_dem, tgt_dem_tag, show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm) : "", d_ent, d_go)
+        d_json := setup_json(tgt_dem, false, tgt_dem_slot, tgt_dem_tag, tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, d_go, d_ent)
     if not na(tgt_sup) and not na(tgt_dem)
         float s_edge = tgt_sup.b.get_bottom()
         float d_edge = tgt_dem.b.get_top()

@@ -824,6 +824,9 @@ trend_line(string nm, int st, float cp, float sh1, float sh2, float sl1, float s
 
 [t_st, t_cp, t_sh1, t_sh2, t_sl1, t_sl2] = request.security(syminfo.tickerid, trend_tf, trend_pack())
 [c_st, c_cp, c_sh1, c_sh2, c_sl1, c_sl2] = trend_pack()
+// the Low timeframe trend (Daily for the Position style). When it points the opposite way to the Mid trend, the two
+// timeframes disagree and the trend check scores half, the same as a range
+[l_st, l_cp, l_sh1, l_sh2, l_sl1, l_sl2] = request.security(syminfo.tickerid, TF0, trend_pack())
 
 var table trend_box = table.new(position.top_right, 1, 2, bgcolor=color.new(color.black, 25), border_width=1, border_color=color.new(color.white, 60))
 if barstate.islast and show_trend
@@ -876,6 +879,11 @@ score_zone(Zone z, bool is_supply, float r_top, float r_btm, box opp, string opp
         s_trend := t_st == -1 ? ((na(t_cp) or btm < t_cp) ? 4 : 2) : t_st == 1 ? 0 : 2
     else
         s_trend := t_st == 1 ? ((na(t_cp) or top > t_cp) ? 4 : 2) : t_st == -1 ? 0 : 2
+    // Low and Mid timeframes pointing opposite ways (Daily up while Weekly is down, or the reverse) is a split
+    // trend: half score, whichever side the trade is on
+    bool split = t_st != 0 and l_st != 0 and l_st != t_st
+    if split
+        s_trend := 2
     float ratio = na(z.ext) or hgt <= 0 ? na : (is_supply ? btm - z.ext : z.ext - top) / hgt
     int s_move = not na(ratio) and ratio >= 2 ? 2 : 0
     int s_os = z.os ? 2 : 0
@@ -889,7 +897,7 @@ score_zone(Zone z, bool is_supply, float r_top, float r_btm, box opp, string opp
             rrr := reward / hgt
     int s_rrr = na(rrr) ? 0 : rrr >= 5 ? 4 : rrr >= 3 ? 2 : 0
     int total = s_range + s_time + s_trend + s_move + s_os + s_pur + s_rrr
-    [total, s_range, s_time, s_trend, s_move, s_os, s_pur, s_rrr, rrr, ratio, pos, opp_nm]
+    [total, s_range, s_time, s_trend, s_move, s_os, s_pur, s_rrr, rrr, ratio, pos, opp_nm, split]
 
 // Entry timing, the sheet's rule: a trade is only taken on the retest of the zone, except when the impulse gapped away
 // from the base, which allows an entry before any retest. A go needs the score as well.
@@ -899,8 +907,8 @@ entry_state(Zone z, int total) =>
     string st = not valid ? "NO (score under " + str.tostring(alert_min) + ")" : z.inside ? "GO (retest now)" : (z.gap_out and z.touches == 0) ? "GO (gap away, no retest needed)" : "WAIT FOR RETEST"
     [go, st]
 
-score_line(int total, int s_range, int s_time, int s_trend, int s_move, int s_os, int s_pur, int s_rrr, float rrr, float ratio, float pos, string opp_nm, float r_top, float r_btm, string r_top_nm, string r_btm_nm) =>
-    "SCORE " + str.tostring(total) + "/20 | range " + (na(pos) ? "? (no HTF zones)" : str.tostring(s_range) + (show_zone_info ? " (" + str.tostring(math.round(pos * 100)) + "% of " + str.tostring(r_btm, format.mintick) + " " + r_btm_nm + " to " + str.tostring(r_top, format.mintick) + " " + r_top_nm + ")" : "")) + " | time " + str.tostring(s_time) + " | trend " + str.tostring(s_trend) + " | move " + str.tostring(s_move) + (na(ratio) ? "" : " (" + str.tostring(ratio, "#.#") + "x)") + " | OS " + str.tostring(s_os) + " | purity " + str.tostring(s_pur) + " | rrr " + str.tostring(s_rrr) + (na(rrr) ? " (no opposing zone)" : " (" + str.tostring(rrr, "#.#") + ":1" + (opp_nm == "" ? "" : " to " + opp_nm) + ")")
+score_line(int total, int s_range, int s_time, int s_trend, int s_move, int s_os, int s_pur, int s_rrr, float rrr, float ratio, float pos, string opp_nm, float r_top, float r_btm, string r_top_nm, string r_btm_nm, bool split) =>
+    "SCORE " + str.tostring(total) + "/20 | range " + (na(pos) ? "? (no HTF zones)" : str.tostring(s_range) + (show_zone_info ? " (" + str.tostring(math.round(pos * 100)) + "% of " + str.tostring(r_btm, format.mintick) + " " + r_btm_nm + " to " + str.tostring(r_top, format.mintick) + " " + r_top_nm + ")" : "")) + " | time " + str.tostring(s_time) + " | trend " + str.tostring(s_trend) + (split ? " (" + tf_name(TF0) + " and " + tf_name(TF1) + " disagree)" : "") + " | move " + str.tostring(s_move) + (na(ratio) ? "" : " (" + str.tostring(ratio, "#.#") + "x)") + " | OS " + str.tostring(s_os) + " | purity " + str.tostring(s_pur) + " | rrr " + str.tostring(s_rrr) + (na(rrr) ? " (no opposing zone)" : " (" + str.tostring(rrr, "#.#") + ":1" + (opp_nm == "" ? "" : " to " + opp_nm) + ")")
 
 num(float x) =>
     na(x) ? "null" : str.tostring(x, "#.####")
@@ -949,9 +957,9 @@ if barstate.islast
                 opp_nm := tf_name(TF2) + " demand"
             if na(opp)
                 opp_nm := ""
-        [tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm] = score_zone(tgt_sup, true, r_top, r_btm, opp, opp_nm)
+        [tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, spl] = score_zone(tgt_sup, true, r_top, r_btm, opp, opp_nm)
         [s_go, s_ent] = entry_state(tgt_sup, tot)
-        mark_target(tgt_sup_slot, true, tgt_sup, tgt_sup_tag, show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, r_top, r_btm, r_top_nm, r_btm_nm) : "", s_ent, s_go)
+        mark_target(tgt_sup_slot, true, tgt_sup, tgt_sup_tag, show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, r_top, r_btm, r_top_nm, r_btm_nm, spl) : "", s_ent, s_go)
         s_json := setup_json(tgt_sup, true, tgt_sup_slot, tgt_sup_tag, tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, s_go, s_ent)
     if not na(tgt_dem)
         box opp = na
@@ -966,9 +974,9 @@ if barstate.islast
                 opp_nm := tf_name(TF2) + " supply"
             if na(opp)
                 opp_nm := ""
-        [tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm] = score_zone(tgt_dem, false, r_top, r_btm, opp, opp_nm)
+        [tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, spl] = score_zone(tgt_dem, false, r_top, r_btm, opp, opp_nm)
         [d_go, d_ent] = entry_state(tgt_dem, tot)
-        mark_target(tgt_dem_slot, false, tgt_dem, tgt_dem_tag, show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, r_top, r_btm, r_top_nm, r_btm_nm) : "", d_ent, d_go)
+        mark_target(tgt_dem_slot, false, tgt_dem, tgt_dem_tag, show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, r_top, r_btm, r_top_nm, r_btm_nm, spl) : "", d_ent, d_go)
         d_json := setup_json(tgt_dem, false, tgt_dem_slot, tgt_dem_tag, tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, d_go, d_ent)
     if not na(tgt_sup) and not na(tgt_dem)
         float s_edge = tgt_sup.b.get_bottom()
@@ -982,7 +990,7 @@ if barstate.islast
     // fires on every bar close, with an empty setups list when there is no target, so the board can tell a silent alert from a chart with nothing to report
     if alerts_on and barstate.isconfirmed
         string trend_s = t_st == 1 ? "UP" : t_st == -1 ? "DOWN" : "RANGE"
-        string msg = '{"symbol":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","chart_tf":"' + timeframe.period + '","style":"' + style + '","low_tf":"' + tf_name(TF0) + '","mid_tf":"' + tf_name(TF1) + '","high_tf":"' + tf_name(TF2) + '","price":' + num(close) + ',"bar_time":' + str.tostring(time) + ',"trend":"' + trend_s + '","control_point":' + num(t_cp) + ',"range_top":' + num(r_top) + ',"range_btm":' + num(r_btm) + ',"alert_min":' + str.tostring(alert_min) + ',"setups":[' + s_json + (s_json != "" and d_json != "" ? "," : "") + d_json + ']}'
+        string msg = '{"symbol":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","chart_tf":"' + timeframe.period + '","style":"' + style + '","low_tf":"' + tf_name(TF0) + '","mid_tf":"' + tf_name(TF1) + '","high_tf":"' + tf_name(TF2) + '","price":' + num(close) + ',"bar_time":' + str.tostring(time) + ',"trend":"' + trend_s + '","low_trend":"' + (l_st == 1 ? "UP" : l_st == -1 ? "DOWN" : "RANGE") + '","control_point":' + num(t_cp) + ',"range_top":' + num(r_top) + ',"range_btm":' + num(r_btm) + ',"alert_min":' + str.tostring(alert_min) + ',"setups":[' + s_json + (s_json != "" and d_json != "" ? "," : "") + d_json + ']}'
         alert(msg, alert.freq_once_per_bar_close)
 
 alertcondition(approach_now, "Price near a target zone", "{{ticker}}: price has covered 80% of the way to the next target zone")

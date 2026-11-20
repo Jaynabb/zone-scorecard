@@ -822,10 +822,13 @@ trend_line(string nm, int st, float cp, float sh1, float sh2, float sl1, float s
     string piv = (na(sh2) or na(sl2)) ? "" : " | highs " + str.tostring(sh1, format.mintick) + (sh1 > sh2 ? " > " : " < ") + str.tostring(sh2, format.mintick) + " | lows " + str.tostring(sl1, format.mintick) + (sl1 > sl2 ? " > " : " < ") + str.tostring(sl2, format.mintick)
     nm + " TREND: " + st_s + cp_s + piv
 
-[t_st, t_cp, t_sh1, t_sh2, t_sl1, t_sl2] = request.security(syminfo.tickerid, trend_tf, trend_pack())
+// lookahead on: the readout and the trend score must match what the Mid timeframe chart itself shows, including a
+// swing confirmed by the current week. Without it, a Daily chart sees last week's closed state, so a fresh higher low
+// (AMD 402.10) is missing and the control point lags. Only the last bar's value is used for scoring
+[t_st, t_cp, t_sh1, t_sh2, t_sl1, t_sl2] = request.security(syminfo.tickerid, trend_tf, trend_pack(), lookahead=barmerge.lookahead_on)
 [c_st, c_cp, c_sh1, c_sh2, c_sl1, c_sl2] = trend_pack()
 // the Low timeframe trend (Daily for the Position style), shown on the label when it pulls against the Mid trend
-[l_st, l_cp, l_sh1, l_sh2, l_sl1, l_sl2] = request.security(syminfo.tickerid, TF0, trend_pack())
+[l_st, l_cp, l_sh1, l_sh2, l_sl1, l_sl2] = request.security(syminfo.tickerid, TF0, trend_pack(), lookahead=barmerge.lookahead_on)
 
 var table trend_box = table.new(position.top_right, 1, 2, bgcolor=color.new(color.black, 25), border_width=1, border_color=color.new(color.white, 60))
 if barstate.islast and show_trend

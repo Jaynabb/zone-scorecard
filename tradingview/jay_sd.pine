@@ -824,8 +824,7 @@ trend_line(string nm, int st, float cp, float sh1, float sh2, float sl1, float s
 
 [t_st, t_cp, t_sh1, t_sh2, t_sl1, t_sl2] = request.security(syminfo.tickerid, trend_tf, trend_pack())
 [c_st, c_cp, c_sh1, c_sh2, c_sl1, c_sl2] = trend_pack()
-// the Low timeframe trend (Daily for the Position style). When it points the opposite way to the Mid trend, the two
-// timeframes disagree and the trend check scores half, the same as a range
+// the Low timeframe trend (Daily for the Position style), shown on the label when it pulls against the Mid trend
 [l_st, l_cp, l_sh1, l_sh2, l_sl1, l_sl2] = request.security(syminfo.tickerid, TF0, trend_pack())
 
 var table trend_box = table.new(position.top_right, 1, 2, bgcolor=color.new(color.black, 25), border_width=1, border_color=color.new(color.white, 60))
@@ -879,11 +878,9 @@ score_zone(Zone z, bool is_supply, float r_top, float r_btm, box opp, string opp
         s_trend := t_st == -1 ? ((na(t_cp) or btm < t_cp) ? 4 : 2) : t_st == 1 ? 0 : 2
     else
         s_trend := t_st == 1 ? ((na(t_cp) or top > t_cp) ? 4 : 2) : t_st == -1 ? 0 : 2
-    // Low and Mid timeframes pointing opposite ways (Daily up while Weekly is down, or the reverse) is a split
-    // trend: half score, whichever side the trade is on
+    // Low and Mid timeframes pointing opposite ways is noted on the label but does not change the score: the Mid
+    // trend on arrival decides. A Daily pullback inside a Weekly uptrend is what brings price to a Daily demand
     bool split = t_st != 0 and l_st != 0 and l_st != t_st
-    if split
-        s_trend := 2
     float ratio = na(z.ext) or hgt <= 0 ? na : (is_supply ? btm - z.ext : z.ext - top) / hgt
     int s_move = not na(ratio) and ratio >= 2 ? 2 : 0
     int s_os = z.os ? 2 : 0
@@ -908,7 +905,7 @@ entry_state(Zone z, int total) =>
     [go, st]
 
 score_line(int total, int s_range, int s_time, int s_trend, int s_move, int s_os, int s_pur, int s_rrr, float rrr, float ratio, float pos, string opp_nm, float r_top, float r_btm, string r_top_nm, string r_btm_nm, bool split) =>
-    "SCORE " + str.tostring(total) + "/20 | range " + (na(pos) ? "? (no HTF zones)" : str.tostring(s_range) + (show_zone_info ? " (" + str.tostring(math.round(pos * 100)) + "% of " + str.tostring(r_btm, format.mintick) + " " + r_btm_nm + " to " + str.tostring(r_top, format.mintick) + " " + r_top_nm + ")" : "")) + " | time " + str.tostring(s_time) + " | trend " + str.tostring(s_trend) + (split ? " (" + tf_name(TF0) + " and " + tf_name(TF1) + " disagree)" : "") + " | move " + str.tostring(s_move) + (na(ratio) ? "" : " (" + str.tostring(ratio, "#.#") + "x)") + " | OS " + str.tostring(s_os) + " | purity " + str.tostring(s_pur) + " | rrr " + str.tostring(s_rrr) + (na(rrr) ? " (no opposing zone)" : " (" + str.tostring(rrr, "#.#") + ":1" + (opp_nm == "" ? "" : " to " + opp_nm) + ")")
+    "SCORE " + str.tostring(total) + "/20 | range " + (na(pos) ? "? (no HTF zones)" : str.tostring(s_range) + (show_zone_info ? " (" + str.tostring(math.round(pos * 100)) + "% of " + str.tostring(r_btm, format.mintick) + " " + r_btm_nm + " to " + str.tostring(r_top, format.mintick) + " " + r_top_nm + ")" : "")) + " | time " + str.tostring(s_time) + " | trend " + str.tostring(s_trend) + (split ? " (" + tf_name(TF0) + " pulling against " + tf_name(TF1) + ")" : "") + " | move " + str.tostring(s_move) + (na(ratio) ? "" : " (" + str.tostring(ratio, "#.#") + "x)") + " | OS " + str.tostring(s_os) + " | purity " + str.tostring(s_pur) + " | rrr " + str.tostring(s_rrr) + (na(rrr) ? " (no opposing zone)" : " (" + str.tostring(rrr, "#.#") + ":1" + (opp_nm == "" ? "" : " to " + opp_nm) + ")")
 
 num(float x) =>
     na(x) ? "null" : str.tostring(x, "#.####")

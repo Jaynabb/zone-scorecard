@@ -20,6 +20,10 @@ string TF1 = use_custom ? tf_mid_in : style == 'Position trader' ? 'W' : style =
 string TF2 = use_custom ? tf_high_in : style == 'Position trader' ? 'M' : style == 'Swing trader' ? 'W' : style == 'Day trader' ? '240' : '60'
 if barstate.isfirst and not (timeframe.in_seconds(TF0) < timeframe.in_seconds(TF1) and timeframe.in_seconds(TF1) < timeframe.in_seconds(TF2))
     runtime.error('Custom timeframes must go Low < Mid < High, for example 5 minutes / 30 minutes / 2 hours.')
+// true on the first chart bar of a new candle of each timeframe
+bool new_d = timeframe.change(TF0)
+bool new_w = timeframe.change(TF1)
+bool new_m = timeframe.change(TF2)
 
 // Readable names: DAILY, WEEKLY, MONTHLY, 4H, 15M ...
 tf_name(string tf) =>
@@ -172,12 +176,17 @@ detect(bool is_supply, int k, float yard) =>
     // that later dips back into the gap does not undo it
     float prev_top = math.max(open[k + 1], close[k + 1])
     float prev_btm = math.min(open[k + 1], close[k + 1])
-    float gap_in = is_supply ? math.max(prev_btm - open[k], 0.0) : math.max(open[k] - prev_top, 0.0)
+    // a gap smaller than a tenth of a typical body is feed noise (24 hour markets open a few cents off the last
+    // close all the time), not price leaving without trading
+    float min_gap = yard * 0.1
+    float gap_raw = is_supply ? math.max(prev_btm - open[k], 0.0) : math.max(open[k] - prev_top, 0.0)
+    float gap_in = gap_raw > min_gap ? gap_raw : 0.0
     bool gap_imp = gap_in > 0
     // a full gap: the impulse opened beyond the previous candle's wick, so price never traded back at the base's edge.
     // This is the "gap away from the zone" that allows an entry before any retest; a gap that only clears the body does not
-    bool gap_full = is_supply ? open[k] < low[k + 1] : open[k] > high[k + 1]
-    float drive = body + nz(gap_in)
+    bool gap_full = is_supply ? open[k] < low[k + 1] - min_gap : open[k] > high[k + 1] + min_gap
+    // a candle closing back toward the base adds nothing: only the gap itself can drive then
+    float drive = away ? body + nz(gap_in) : nz(gap_in)
     if not na(body) and drive >= lim and (away or gap_imp)
         float base_lim = drive * base_mult
         float a_lo = na   // full range of the first base candle, the one next to the impulse
@@ -195,7 +204,7 @@ detect(bool is_supply, int k, float yard) =>
             // a gap between two base candles ends the base: only the candles on the impulse side of the gap are the
             // zone (gap refined), as the sheet draws it. A gap is the later candle opening outside the earlier
             // candle's body, the space you see between bodies on the chart. The gap itself is impulsive movement
-            if cnt > 0 and (open[off - 1] > math.max(open[off], close[off]) or open[off - 1] < math.min(open[off], close[off]))
+            if cnt > 0 and (open[off - 1] > bh + min_gap or open[off - 1] < bl - min_gap)
                 gap_cut := true
                 break
             if cnt > 0 and (bh < a_lo or bl > a_hi)
@@ -232,8 +241,10 @@ detect(bool is_supply, int k, float yard) =>
     [found, z_top, z_btm, lt, cnt, time[k], turn, t_t0, t_t1, t_ext, gap_cut, gap_full and found]
 
 // True when price travelled at least dep_mult x zone height beyond the zone edge over the k closed candles starting at the impulse.
+// Also returns the furthest price reached, so the move score counts the follow-through that came before the zone was drawn.
 departs(bool is_supply, int k, float top, float btm, float yard) =>
     bool ok = false
+    float out = na
     float need = (top - btm) * dep_mult
     if not na(top) and not na(btm) and k >= 1
         float ext = na
@@ -241,16 +252,17 @@ departs(bool is_supply, int k, float top, float btm, float yard) =>
             int off = k - i + 1
             ext := is_supply ? (na(ext) ? low[off] : math.min(ext, low[off])) : (na(ext) ? high[off] : math.max(ext, high[off]))
         ok := is_supply ? ext <= btm - need : ext >= top + need
-    ok
+        out := ext
+    [ok, out]
 
 // One candidate per side per bar: an impulse that closed last bar and already departed far enough,
 // otherwise an impulse dep_bars ago whose follow-through has now departed far enough.
 candidate(bool is_supply, float yard) =>
     [f1, t1, b1, l1, n1, i1, tn1, a1, c1, x1, g1, o1] = detect(is_supply, 1, yard)
-    bool dep1 = departs(is_supply, 1, t1, b1, yard)
+    [dep1, mx1] = departs(is_supply, 1, t1, b1, yard)
     bool ok1 = f1 and (not use_departure or dep1)
     [f2, t2, b2, l2, n2, i2, tn2, a2, c2, x2, g2, o2] = detect(is_supply, dep_bars, yard)
-    bool dep2 = departs(is_supply, dep_bars, t2, b2, yard)
+    [dep2, mx2] = departs(is_supply, dep_bars, t2, b2, yard)
     bool ok2 = f2 and (not use_departure or dep2)
     // a zone found late (impulse dep_bars ago) is dead on arrival if any candle since the impulse closed through its far edge
     if ok2
@@ -266,21 +278,24 @@ candidate(bool is_supply, float yard) =>
     int it = ok1 ? i1 : i2
     bool gp = ok1 ? g1 : g2
     bool go = ok1 ? o1 : o2
+    float mx = ok1 ? mx1 : mx2
     // a turn with no clean base counts only once price has departed from the extreme like a zone would
-    bool td1 = tn1 and (not use_departure or departs(is_supply, 1, is_supply ? x1 : x1 + yard, is_supply ? x1 - yard : x1, yard))
-    bool td2 = tn2 and (not use_departure or departs(is_supply, dep_bars, is_supply ? x2 : x2 + yard, is_supply ? x2 - yard : x2, yard))
+    [tdep1, tmx1] = departs(is_supply, 1, is_supply ? x1 : x1 + yard, is_supply ? x1 - yard : x1, yard)
+    [tdep2, tmx2] = departs(is_supply, dep_bars, is_supply ? x2 : x2 + yard, is_supply ? x2 - yard : x2, yard)
+    bool td1 = tn1 and (not use_departure or tdep1)
+    bool td2 = tn2 and (not use_departure or tdep2)
     bool turn = not found and (td1 or td2)
     int tt0 = td1 ? a1 : a2
     int tt1 = td1 ? c1 : c2
     float tx = td1 ? x1 : x2
-    [found, top, btm, lt, n, it, turn, tt0, tt1, tx, gp, go]
+    [found, top, btm, lt, n, it, turn, tt0, tt1, tx, gp, go, mx]
 
 // Everything a timeframe reports each bar.
 tf_pack() =>
     float yard = ta.median(math.abs(close - open), typ_len)
-    [s_f, s_top, s_btm, s_t, s_n, s_i, s_tn, s_a, s_c, s_x, s_g, s_o] = candidate(true, yard)
-    [d_f, d_top, d_btm, d_t, d_n, d_i, d_tn, d_a, d_c, d_x, d_g, d_o] = candidate(false, yard)
-    [s_f, s_top, s_btm, s_t, s_n, s_i, d_f, d_top, d_btm, d_t, d_n, d_i, close, high, low, yard, s_tn, s_a, s_c, s_x, d_tn, d_a, d_c, d_x, s_g, d_g, s_o, d_o]
+    [s_f, s_top, s_btm, s_t, s_n, s_i, s_tn, s_a, s_c, s_x, s_g, s_o, s_m] = candidate(true, yard)
+    [d_f, d_top, d_btm, d_t, d_n, d_i, d_tn, d_a, d_c, d_x, d_g, d_o, d_m] = candidate(false, yard)
+    [s_f, s_top, s_btm, s_t, s_n, s_i, d_f, d_top, d_btm, d_t, d_n, d_i, close, high, low, yard, s_tn, s_a, s_c, s_x, d_tn, d_a, d_c, d_x, s_g, d_g, s_o, d_o, s_m, d_m]
 
 //-----------------------------------------------------------------------------
 // DATA REQUESTS
@@ -302,13 +317,13 @@ int lo_bars_d = timeframe.in_seconds(TF0) < chart_sec ? 100000 : 5
 int lo_bars_w = timeframe.in_seconds(TF1) < chart_sec ? 100000 : 5
 int lo_bars_m = timeframe.in_seconds(TF2) < chart_sec ? 100000 : 5
 
-[d_sf, d_st, d_sb, d_stm, d_sn, d_si, d_df, d_dt, d_db, d_dtm, d_dn, d_di, d_c, d_h, d_l, d_a, d_stn, d_st0, d_st1, d_stx, d_dtn, d_dt0, d_dt1, d_dtx, d_sg, d_dg, d_so, d_do] = request.security(syminfo.tickerid, tf_d_hi, tf_pack())
-[w_sf, w_st, w_sb, w_stm, w_sn, w_si, w_df, w_dt, w_db, w_dtm, w_dn, w_di, w_c, w_h, w_l, w_a, w_stn, w_st0, w_st1, w_stx, w_dtn, w_dt0, w_dt1, w_dtx, w_sg, w_dg, w_so, w_do] = request.security(syminfo.tickerid, tf_w_hi, tf_pack())
-[m_sf, m_st, m_sb, m_stm, m_sn, m_si, m_df, m_dt, m_db, m_dtm, m_dn, m_di, m_c, m_h, m_l, m_a, m_stn, m_st0, m_st1, m_stx, m_dtn, m_dt0, m_dt1, m_dtx, m_sg, m_dg, m_so, m_do] = request.security(syminfo.tickerid, tf_m_hi, tf_pack())
+[d_sf, d_st, d_sb, d_stm, d_sn, d_si, d_df, d_dt, d_db, d_dtm, d_dn, d_di, d_c, d_h, d_l, d_a, d_stn, d_st0, d_st1, d_stx, d_dtn, d_dt0, d_dt1, d_dtx, d_sg, d_dg, d_so, d_do, d_sm, d_dm] = request.security(syminfo.tickerid, tf_d_hi, tf_pack())
+[w_sf, w_st, w_sb, w_stm, w_sn, w_si, w_df, w_dt, w_db, w_dtm, w_dn, w_di, w_c, w_h, w_l, w_a, w_stn, w_st0, w_st1, w_stx, w_dtn, w_dt0, w_dt1, w_dtx, w_sg, w_dg, w_so, w_do, w_sm, w_dm] = request.security(syminfo.tickerid, tf_w_hi, tf_pack())
+[m_sf, m_st, m_sb, m_stm, m_sn, m_si, m_df, m_dt, m_db, m_dtm, m_dn, m_di, m_c, m_h, m_l, m_a, m_stn, m_st0, m_st1, m_stx, m_dtn, m_dt0, m_dt1, m_dtx, m_sg, m_dg, m_so, m_do, m_sm, m_dm] = request.security(syminfo.tickerid, tf_m_hi, tf_pack())
 
-[d_sf_a, d_st_a, d_sb_a, d_stm_a, d_sn_a, d_si_a, d_df_a, d_dt_a, d_db_a, d_dtm_a, d_dn_a, d_di_a, d_c_a, d_h_a, d_l_a, d_a_a, d_stn_a, d_st0_a, d_st1_a, d_stx_a, d_dtn_a, d_dt0_a, d_dt1_a, d_dtx_a, d_sg_a, d_dg_a, d_so_a, d_do_a] = request.security_lower_tf(syminfo.tickerid, tf_d_lo, tf_pack(), calc_bars_count=lo_bars_d)
-[w_sf_a, w_st_a, w_sb_a, w_stm_a, w_sn_a, w_si_a, w_df_a, w_dt_a, w_db_a, w_dtm_a, w_dn_a, w_di_a, w_c_a, w_h_a, w_l_a, w_a_a, w_stn_a, w_st0_a, w_st1_a, w_stx_a, w_dtn_a, w_dt0_a, w_dt1_a, w_dtx_a, w_sg_a, w_dg_a, w_so_a, w_do_a] = request.security_lower_tf(syminfo.tickerid, tf_w_lo, tf_pack(), calc_bars_count=lo_bars_w)
-[m_sf_a, m_st_a, m_sb_a, m_stm_a, m_sn_a, m_si_a, m_df_a, m_dt_a, m_db_a, m_dtm_a, m_dn_a, m_di_a, m_c_a, m_h_a, m_l_a, m_a_a, m_stn_a, m_st0_a, m_st1_a, m_stx_a, m_dtn_a, m_dt0_a, m_dt1_a, m_dtx_a, m_sg_a, m_dg_a, m_so_a, m_do_a] = request.security_lower_tf(syminfo.tickerid, tf_m_lo, tf_pack(), calc_bars_count=lo_bars_m)
+[d_sf_a, d_st_a, d_sb_a, d_stm_a, d_sn_a, d_si_a, d_df_a, d_dt_a, d_db_a, d_dtm_a, d_dn_a, d_di_a, d_c_a, d_h_a, d_l_a, d_a_a, d_stn_a, d_st0_a, d_st1_a, d_stx_a, d_dtn_a, d_dt0_a, d_dt1_a, d_dtx_a, d_sg_a, d_dg_a, d_so_a, d_do_a, d_sm_a, d_dm_a] = request.security_lower_tf(syminfo.tickerid, tf_d_lo, tf_pack(), calc_bars_count=lo_bars_d)
+[w_sf_a, w_st_a, w_sb_a, w_stm_a, w_sn_a, w_si_a, w_df_a, w_dt_a, w_db_a, w_dtm_a, w_dn_a, w_di_a, w_c_a, w_h_a, w_l_a, w_a_a, w_stn_a, w_st0_a, w_st1_a, w_stx_a, w_dtn_a, w_dt0_a, w_dt1_a, w_dtx_a, w_sg_a, w_dg_a, w_so_a, w_do_a, w_sm_a, w_dm_a] = request.security_lower_tf(syminfo.tickerid, tf_w_lo, tf_pack(), calc_bars_count=lo_bars_w)
+[m_sf_a, m_st_a, m_sb_a, m_stm_a, m_sn_a, m_si_a, m_df_a, m_dt_a, m_db_a, m_dtm_a, m_dn_a, m_di_a, m_c_a, m_h_a, m_l_a, m_a_a, m_stn_a, m_st0_a, m_st1_a, m_stx_a, m_dtn_a, m_dt0_a, m_dt1_a, m_dtx_a, m_sg_a, m_dg_a, m_so_a, m_do_a, m_sm_a, m_dm_a] = request.security_lower_tf(syminfo.tickerid, tf_m_lo, tf_pack(), calc_bars_count=lo_bars_m)
 
 //-----------------------------------------------------------------------------
 // ZONE FUNCTIONS
@@ -402,7 +417,7 @@ broke_opposing(int slot, bool is_supply, int left_time, int imp_t) =>
 // z_top, z_btm = zone edges from the base
 // yard_tf = typical (median) candle body of the zone's own timeframe
 // n = number of base candles, imp_t = time of the impulse candle
-create_zone(array<Zone> zones, bool is_supply, float z_top, float z_btm, int left_time, int slot, float yard_tf, int n, int imp_t, bool gp, bool go, bool from_lower) =>
+create_zone(array<Zone> zones, bool is_supply, float z_top, float z_btm, int left_time, int slot, float yard_tf, int n, int imp_t, bool gp, bool go, bool from_lower, float mx) =>
     float buffer = yard_tf * box_width
     bool flat = na(z_top) or na(z_btm) or (z_top - z_btm) <= syminfo.mintick
     float anchor = is_supply ? z_top : z_btm
@@ -432,6 +447,7 @@ create_zone(array<Zone> zones, bool is_supply, float z_top, float z_btm, int lef
         z.lt := left_time
         z.gap := gp
         z.gap_out := go
+        z.ext := mx
         z.os := broke_opposing(slot, is_supply, left_time, imp_t)
         zones.unshift(z)
         zones.trim(max_zones)
@@ -487,14 +503,14 @@ monitor(array<Zone> zones, bool is_supply, int slot, float c, float h, float l) 
                 zones.remove(i)
 
 // Adds a reported base as a zone once, keyed by its leftmost candle time.
-add_once(array<Zone> zones, bool is_supply, int slot, bool found, float top, float btm, int lt, int n, int imp_t, float atr_tf, bool gp, bool go) =>
+add_once(array<Zone> zones, bool is_supply, int slot, bool found, float top, float btm, int lt, int n, int imp_t, float atr_tf, bool gp, bool go, float mx) =>
     if found and not na(lt)
         int key = lt * 8 + slot * 2 + (is_supply ? 0 : 1)
         if seen_keys.indexof(key) < 0
             seen_keys.unshift(key)
             if seen_keys.size() > 400
                 seen_keys.pop()
-            create_zone(zones, is_supply, top, btm, lt, slot, atr_tf, n, imp_t, gp, go, false)
+            create_zone(zones, is_supply, top, btm, lt, slot, atr_tf, n, imp_t, gp, go, false, mx)
 
 // Oppositional structure covers the whole directional move out of the zone, not just the impulse candle:
 // until the zone's first retest, any close through an opposing zone of the same timeframe that already existed
@@ -550,7 +566,7 @@ resolve_turns(int slot, bool is_supply, array<Zone> zones, float yard_h, float t
                         bool dead = false
                         float far = na
                         if in_window and at_extreme
-                            for q = 1 to 120
+                            for q = 1 to math.min(499, math.max(120, int(life / (chart_sec * 1000))))
                                 if time_close[q] <= lz.lt
                                     break
                                 far := is_supply ? (na(far) ? tf_close[q] : math.max(far, tf_close[q])) : (na(far) ? tf_close[q] : math.min(far, tf_close[q]))
@@ -559,7 +575,7 @@ resolve_turns(int slot, bool is_supply, array<Zone> zones, float yard_h, float t
                                     break
                         if in_window and at_extreme and not dead
                             int before = zones.size()
-                            create_zone(zones, is_supply, lb.get_top(), lb.get_bottom(), lz.lt, slot, yard_h, lz.base_n, t1, lz.gap, lz.gap_out, true)
+                            create_zone(zones, is_supply, lb.get_top(), lb.get_bottom(), lz.lt, slot, yard_h, lz.base_n, t1, lz.gap, lz.gap_out, true, na)
                             if zones.size() > before
                                 Zone pz = zones.get(0)
                                 pz.via_lower := true
@@ -572,23 +588,32 @@ resolve_turns(int slot, bool is_supply, array<Zone> zones, float yard_h, float t
                     pt_t1.remove(i)
                     pt_ext.remove(i)
 
-process_slot(int slot, int mode, bool show, array<Zone> sup, array<Zone> dem, bool h_sf, float h_st, float h_sb, int h_stm, int h_sn, int h_si, bool h_df, float h_dt, float h_db, int h_dtm, int h_dn, int h_di, float h_c, float h_h, float h_l, float h_a, array<bool> l_sf, array<float> l_st, array<float> l_sb, array<int> l_stm, array<int> l_sn, array<int> l_si, array<bool> l_df, array<float> l_dt, array<float> l_db, array<int> l_dtm, array<int> l_dn, array<int> l_di, array<float> l_c, array<float> l_h, array<float> l_l, array<float> l_a, bool h_stn, int h_st0, int h_st1, float h_stx, bool h_dtn, int h_dt0, int h_dt1, float h_dtx, bool h_sg, bool h_dg, array<bool> l_sg, array<bool> l_dg, bool h_so, bool h_do, array<bool> l_so, array<bool> l_do) =>
+process_slot(int slot, int mode, bool show, array<Zone> sup, array<Zone> dem, bool h_sf, float h_st, float h_sb, int h_stm, int h_sn, int h_si, bool h_df, float h_dt, float h_db, int h_dtm, int h_dn, int h_di, float h_c, float h_h, float h_l, float h_a, array<bool> l_sf, array<float> l_st, array<float> l_sb, array<int> l_stm, array<int> l_sn, array<int> l_si, array<bool> l_df, array<float> l_dt, array<float> l_db, array<int> l_dtm, array<int> l_dn, array<int> l_di, array<float> l_c, array<float> l_h, array<float> l_l, array<float> l_a, bool h_stn, int h_st0, int h_st1, float h_stx, bool h_dtn, int h_dt0, int h_dt1, float h_dtx, bool h_sg, bool h_dg, array<bool> l_sg, array<bool> l_dg, bool h_so, bool h_do, array<bool> l_so, array<bool> l_do, float h_sm, float h_dm, array<float> l_sm, array<float> l_dm, bool tf_new) =>
+    float pc = h_c[1]
+    float ph = h_h[1]
+    float pl = h_l[1]
     if show
         if mode == 2
             if l_c.size() > 0
                 for i = 0 to l_c.size() - 1
-                    add_once(sup, true, slot, l_sf.get(i), l_st.get(i), l_sb.get(i), l_stm.get(i), l_sn.get(i), l_si.get(i), l_a.get(i), l_sg.get(i), l_so.get(i))
-                    add_once(dem, false, slot, l_df.get(i), l_dt.get(i), l_db.get(i), l_dtm.get(i), l_dn.get(i), l_di.get(i), l_a.get(i), l_dg.get(i), l_do.get(i))
+                    add_once(sup, true, slot, l_sf.get(i), l_st.get(i), l_sb.get(i), l_stm.get(i), l_sn.get(i), l_si.get(i), l_a.get(i), l_sg.get(i), l_so.get(i), l_sm.get(i))
+                    add_once(dem, false, slot, l_df.get(i), l_dt.get(i), l_db.get(i), l_dtm.get(i), l_dn.get(i), l_di.get(i), l_a.get(i), l_dg.get(i), l_do.get(i), l_dm.get(i))
                     monitor(sup, true, slot, l_c.get(i), l_h.get(i), l_l.get(i))
                     monitor(dem, false, slot, l_c.get(i), l_h.get(i), l_l.get(i))
                 sup.update_os(true, slot)
                 dem.update_os(false, slot)
             0
         else
-            add_once(sup, true, slot, h_sf, h_st, h_sb, h_stm, h_sn, h_si, h_a, h_sg, h_so)
-            add_once(dem, false, slot, h_df, h_dt, h_db, h_dtm, h_dn, h_di, h_a, h_dg, h_do)
-            monitor(sup, true, slot, h_c, h_h, h_l)
-            monitor(dem, false, slot, h_c, h_h, h_l)
+            add_once(sup, true, slot, h_sf, h_st, h_sb, h_stm, h_sn, h_si, h_a, h_sg, h_so, h_sm)
+            add_once(dem, false, slot, h_df, h_dt, h_db, h_dtm, h_dn, h_di, h_a, h_dg, h_do, h_dm)
+            // On live bars a higher timeframe candle is still forming, so its close would kill a zone that history
+            // (which only sees finished candles) keeps. Live, a zone is judged once that candle has closed
+            if not (barstate.isrealtime and mode == 1)
+                monitor(sup, true, slot, h_c, h_h, h_l)
+                monitor(dem, false, slot, h_c, h_h, h_l)
+            else if tf_new
+                monitor(sup, true, slot, pc, ph, pl)
+                monitor(dem, false, slot, pc, ph, pl)
             sup.update_os(true, slot)
             dem.update_os(false, slot)
             note_turn(slot, true, h_stn, h_st0, h_st1, h_stx)
@@ -700,10 +725,10 @@ nearest_zone_box(array<Zone> zones, bool is_supply) =>
 //-----------------------------------------------------------------------------
 // MAIN LOGIC
 //-----------------------------------------------------------------------------
-process_slot(0, mode_d, show_d, sup_d, dem_d, d_sf, d_st, d_sb, d_stm, d_sn, d_si, d_df, d_dt, d_db, d_dtm, d_dn, d_di, d_c, d_h, d_l, d_a, d_sf_a, d_st_a, d_sb_a, d_stm_a, d_sn_a, d_si_a, d_df_a, d_dt_a, d_db_a, d_dtm_a, d_dn_a, d_di_a, d_c_a, d_h_a, d_l_a, d_a_a, d_stn, d_st0, d_st1, d_stx, d_dtn, d_dt0, d_dt1, d_dtx, d_sg, d_dg, d_sg_a, d_dg_a, d_so, d_do, d_so_a, d_do_a)
-process_slot(1, mode_w, show_w, sup_w, dem_w, w_sf, w_st, w_sb, w_stm, w_sn, w_si, w_df, w_dt, w_db, w_dtm, w_dn, w_di, w_c, w_h, w_l, w_a, w_sf_a, w_st_a, w_sb_a, w_stm_a, w_sn_a, w_si_a, w_df_a, w_dt_a, w_db_a, w_dtm_a, w_dn_a, w_di_a, w_c_a, w_h_a, w_l_a, w_a_a, w_stn, w_st0, w_st1, w_stx, w_dtn, w_dt0, w_dt1, w_dtx, w_sg, w_dg, w_sg_a, w_dg_a, w_so, w_do, w_so_a, w_do_a)
+process_slot(0, mode_d, show_d, sup_d, dem_d, d_sf, d_st, d_sb, d_stm, d_sn, d_si, d_df, d_dt, d_db, d_dtm, d_dn, d_di, d_c, d_h, d_l, d_a, d_sf_a, d_st_a, d_sb_a, d_stm_a, d_sn_a, d_si_a, d_df_a, d_dt_a, d_db_a, d_dtm_a, d_dn_a, d_di_a, d_c_a, d_h_a, d_l_a, d_a_a, d_stn, d_st0, d_st1, d_stx, d_dtn, d_dt0, d_dt1, d_dtx, d_sg, d_dg, d_sg_a, d_dg_a, d_so, d_do, d_so_a, d_do_a, d_sm, d_dm, d_sm_a, d_dm_a, new_d)
+process_slot(1, mode_w, show_w, sup_w, dem_w, w_sf, w_st, w_sb, w_stm, w_sn, w_si, w_df, w_dt, w_db, w_dtm, w_dn, w_di, w_c, w_h, w_l, w_a, w_sf_a, w_st_a, w_sb_a, w_stm_a, w_sn_a, w_si_a, w_df_a, w_dt_a, w_db_a, w_dtm_a, w_dn_a, w_di_a, w_c_a, w_h_a, w_l_a, w_a_a, w_stn, w_st0, w_st1, w_stx, w_dtn, w_dt0, w_dt1, w_dtx, w_sg, w_dg, w_sg_a, w_dg_a, w_so, w_do, w_so_a, w_do_a, w_sm, w_dm, w_sm_a, w_dm_a, new_w)
 // the High timeframe has its own lower-tf arrays: on intraday styles it can sit below the chart (a 4H High on a Daily chart)
-process_slot(2, mode_m, show_m, sup_m, dem_m, m_sf, m_st, m_sb, m_stm, m_sn, m_si, m_df, m_dt, m_db, m_dtm, m_dn, m_di, m_c, m_h, m_l, m_a, m_sf_a, m_st_a, m_sb_a, m_stm_a, m_sn_a, m_si_a, m_df_a, m_dt_a, m_db_a, m_dtm_a, m_dn_a, m_di_a, m_c_a, m_h_a, m_l_a, m_a_a, m_stn, m_st0, m_st1, m_stx, m_dtn, m_dt0, m_dt1, m_dtx, m_sg, m_dg, m_sg_a, m_dg_a, m_so, m_do, m_so_a, m_do_a)
+process_slot(2, mode_m, show_m, sup_m, dem_m, m_sf, m_st, m_sb, m_stm, m_sn, m_si, m_df, m_dt, m_db, m_dtm, m_dn, m_di, m_c, m_h, m_l, m_a, m_sf_a, m_st_a, m_sb_a, m_stm_a, m_sn_a, m_si_a, m_df_a, m_dt_a, m_db_a, m_dtm_a, m_dn_a, m_di_a, m_c_a, m_h_a, m_l_a, m_a_a, m_stn, m_st0, m_st1, m_stx, m_dtn, m_dt0, m_dt1, m_dtx, m_sg, m_dg, m_sg_a, m_dg_a, m_so, m_do, m_so_a, m_do_a, m_sm, m_dm, m_sm_a, m_dm_a, new_m)
 
 if barstate.islast
     // size the boxes once, on the last bar, so no box is ever positioned off the start of the chart
@@ -724,9 +749,9 @@ if barstate.islast
     // is taken and where trend is scored, so the Weekly and Monthly charts outline the same Daily boxes
     // the Daily chart does. Only when Daily is switched off does the chart timeframe take over.
     bool hl_d = highlight_nearest and show_d
-    bool hl_w = highlight_nearest and not show_d and show_w and mode_w == 0
-    bool hl_m = highlight_nearest and not show_d and show_m and mode_m == 0
-    int anchor_slot = show_d ? 0 : mode_w == 0 ? 1 : mode_m == 0 ? 2 : 0
+    int anchor_slot = show_d ? 0 : show_w ? 1 : show_m ? 2 : 0
+    bool hl_w = highlight_nearest and anchor_slot == 1
+    bool hl_m = highlight_nearest and anchor_slot == 2
     array<box> a_s = array.new<box>()
     array<box> a_d = array.new<box>()
     if anchor_slot == 0
@@ -836,13 +861,16 @@ trend_line(string nm, int st, float cp, float sh1, float sh2, float sl1, float s
 // the Low timeframe trend (Daily for the Position style), shown on the label when it pulls against the Mid trend
 [l_st, l_cp, l_sh1, l_sh2, l_sl1, l_sl2] = request.security(syminfo.tickerid, TF0, trend_pack(), lookahead=timeframe.in_seconds(TF0) > chart_sec ? barmerge.lookahead_on : barmerge.lookahead_off)
 
-var table trend_box = table.new(position.top_right, 1, 2, bgcolor=color.new(color.black, 25), border_width=1, border_color=color.new(color.white, 60))
+var table trend_box = table.new(position.top_right, 1, 3, bgcolor=color.new(color.black, 25), border_width=1, border_color=color.new(color.white, 60))
 if barstate.islast and show_trend
     trend_box.cell(0, 0, trend_line(tf_name(trend_tf), t_st, t_cp, t_sh1, t_sh2, t_sl1, t_sl2), text_color=color.white, text_size=size.small, text_halign=text.align_left)
     if timeframe.in_seconds(trend_tf) != timeframe.in_seconds(TF0)
         trend_box.cell(0, 1, trend_line(tf_name(TF0), l_st, l_cp, l_sh1, l_sh2, l_sl1, l_sl2), text_color=color.new(color.white, 30), text_size=size.small, text_halign=text.align_left)
     else
         trend_box.cell(0, 1, "", text_size=size.small)
+    // the Low timeframe far below the chart (Scalper on a Daily chart) means hundreds of candles per bar: slow and coarse
+    if timeframe.in_seconds(TF0) * 100 < chart_sec
+        trend_box.cell(0, 2, "Chart timeframe is far above the Low timeframe (" + tf_name(TF0) + "). Drop the chart to " + tf_name(TF1) + " or lower for reliable zones.", text_color=color.orange, text_size=size.small, text_halign=text.align_left)
 
 //-----------------------------------------------------------------------------
 // SETUP SCORE AND ALERTS

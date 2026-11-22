@@ -56,6 +56,7 @@ int show_n = input.int(3, 'Show Nearest Zones Per Side', minval=1, maxval=20, gr
 
 string tf_group = 'Timeframes'
 bool show_d = input.bool(true, 'Low timeframe zones (entry)', group=tf_group)
+bool show_minor = input.bool(true, 'Minor zones (warning only)', group=tf_group, tooltip='Dotted outlines on the chart timeframe at old turning points that never made a full zone (the base candles were too big or price did not move away far enough). Price often stalls there. They are never targets, never scored and never give a GO. A minor zone disappears when a candle closes through it.')
 bool show_w = input.bool(true, 'Mid timeframe zones (trend)', group=tf_group)
 bool show_m = input.bool(true, 'High timeframe zones (range)', group=tf_group)
 bool highlight_nearest = input.bool(true, 'Outline Nearest Zones In White', group=tf_group, tooltip='On the chart timeframe, the closest supply above price and the closest demand below price get a white border and a TARGET label. Higher timeframe frames are never tagged as targets.')
@@ -741,10 +742,72 @@ process_slot(1, mode_w, show_w, sup_w, dem_w, w_sf, w_st, w_sb, w_stm, w_sn, w_s
 // the High timeframe has its own lower-tf arrays: on intraday styles it can sit below the chart (a 4H High on a Daily chart)
 process_slot(2, mode_m, show_m, sup_m, dem_m, m_sf, m_st, m_sb, m_stm, m_sn, m_si, m_df, m_dt, m_db, m_dtm, m_dn, m_di, m_c, m_h, m_l, m_a, m_sf_a, m_st_a, m_sb_a, m_stm_a, m_sn_a, m_si_a, m_df_a, m_dt_a, m_db_a, m_dtm_a, m_dn_a, m_di_a, m_c_a, m_h_a, m_l_a, m_a_a, m_stn, m_st0, m_st1, m_stx, m_dtn, m_dt0, m_dt1, m_dtx, m_sg, m_dg, m_sg_a, m_dg_a, m_so, m_do, m_so_a, m_do_a, m_sm, m_dm, m_sm_a, m_dm_a, new_m)
 
+//-----------------------------------------------------------------------------
+// MINOR ZONES (chart timeframe, warning only)
+// A swing high or low that price turned from sharply, where no full zone was drawn. The zone runs from the wick
+// extreme to the nearest body edge of the turning candle and its two neighbours (the wick zone), where price tends to
+// stall on the way back. Skipped where a full zone of either side already sits. Never a target, never scored.
+//-----------------------------------------------------------------------------
+var array<box> min_sup = array.new<box>()
+var array<box> min_dem = array.new<box>()
+int mz_len = 5
+float m_yard = ta.median(math.abs(close - open), typ_len)
+float m_ph = ta.pivothigh(high, mz_len, mz_len)
+float m_pl = ta.pivotlow(low, mz_len, mz_len)
+float m_lo = ta.lowest(low, mz_len)
+float m_hi = ta.highest(high, mz_len)
+
+minor_clash(array<Zone> zones, float top, float btm) =>
+    bool hit = false
+    if zones.size() > 0
+        for z in zones
+            if top >= z.b.get_bottom() and btm <= z.b.get_top()
+                hit := true
+                break
+    hit
+
+minor_add(array<box> arr, bool is_supply, float top, float btm, int t) =>
+    bool hit = minor_clash(sup_d, top, btm) or minor_clash(dem_d, top, btm)
+    if arr.size() > 0 and not hit
+        for b in arr
+            if top >= b.get_bottom() and btm <= b.get_top()
+                hit := true
+                break
+    if not hit
+        color col = is_supply ? sup_d_col : dem_d_col
+        arr.unshift(box.new(t, top, time, btm, xloc=xloc.bar_time, border_color=color.new(col, 15), border_width=1, border_style=line.style_dotted, bgcolor=color.new(col, 92)))
+        if arr.size() > 6
+            arr.pop().delete()
+
+// a candle closing through the far edge ends a minor zone, like a full one
+minor_update(array<box> arr, bool is_supply) =>
+    if arr.size() > 0
+        for i = arr.size() - 1 to 0
+            box b = arr.get(i)
+            if is_supply ? close > b.get_top() : close < b.get_bottom()
+                b.delete()
+                arr.remove(i)
+
+if show_minor and barstate.isconfirmed and not na(m_yard) and m_yard > 0
+    minor_update(min_sup, true)
+    minor_update(min_dem, false)
+    int p = mz_len
+    // the turn must have pushed price away at least three typical bodies by the time the swing is confirmed
+    if not na(m_ph) and m_ph - m_lo >= 3 * m_yard
+        float near = math.max(math.max(open[p - 1], close[p - 1]), math.max(open[p], close[p]), math.max(open[p + 1], close[p + 1]))
+        minor_add(min_sup, true, m_ph, math.min(near, m_ph - m_yard * 0.25), time[p])
+    if not na(m_pl) and m_hi - m_pl >= 3 * m_yard
+        float near = math.min(math.min(open[p - 1], close[p - 1]), math.min(open[p], close[p]), math.min(open[p + 1], close[p + 1]))
+        minor_add(min_dem, false, math.max(near, m_pl + m_yard * 0.25), m_pl, time[p])
+
 if barstate.islast
     // size the boxes once, on the last bar, so no box is ever positioned off the start of the chart
     int future_time = time + (5 * timeframe.in_seconds() * 1000)
     sup_d.size_all(0, future_time)
+    for b in min_sup
+        b.set_right(future_time)
+    for b in min_dem
+        b.set_right(future_time)
     dem_d.size_all(0, future_time)
     sup_w.size_all(1, future_time)
     dem_w.size_all(1, future_time)

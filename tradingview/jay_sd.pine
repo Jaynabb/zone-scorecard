@@ -806,6 +806,8 @@ trend_pack() =>
     var float last = na
     var int state = 0
     var float cp = na
+    var float lo_since = na   // lowest low since the last swing low was set
+    var float hi_since = na   // highest high since the last swing high was set
     float ph = ta.pivothigh(high, zz_len, zz_right)
     float pl = ta.pivotlow(low, zz_len, zz_right)
     bool is_high = not na(ph)
@@ -831,6 +833,12 @@ trend_pack() =>
         last := ph
         sh2 := sh1
         sh1 := ph
+    if sl1 != sl1[1]
+        lo_since := na
+    if sh1 != sh1[1]
+        hi_since := na
+    lo_since := na(lo_since) ? low : math.min(lo_since, low)
+    hi_since := na(hi_since) ? high : math.max(hi_since, high)
     // a confirmed swing that extends the pullback side moves the control point: lower high in a downtrend, higher low in an uptrend
     // (a trend that began before its first pullback swing existed takes the first confirmed swing as its control point)
     if state == -1 and is_high and (na(cp) or ph < cp)
@@ -846,10 +854,16 @@ trend_pack() =>
     else if state != -1 and not na(sup) and close < sup
         state := -1
         cp := sh1
-    [state, cp, sh1, sh2, sl1, sl2]
+    // Consolidation: the trend has not ended (no close through the control point) but it has stopped pushing.
+    // A downtrend that failed to make a lower low (last swing low above the one before, and nothing traded below it
+    // since) is moving sideways. Mirror for up. Scored like no trend
+    bool new_lo = not na(sl1) and lo_since < sl1
+    bool new_hi = not na(sh1) and hi_since > sh1
+    bool cons = state == -1 ? (not na(sl2) and sl1 >= sl2 and not new_lo) : state == 1 ? (not na(sh2) and sh1 <= sh2 and not new_hi) : false
+    [state, cp, sh1, sh2, sl1, sl2, cons]
 
-trend_line(string nm, int st, float cp, float sh1, float sh2, float sl1, float sl2) =>
-    string st_s = st == 1 ? "UP" : st == -1 ? "DOWN" : "RANGE (no break of structure yet)"
+trend_line(string nm, int st, float cp, float sh1, float sh2, float sl1, float sl2, bool cons) =>
+    string st_s = cons ? "CONSOLIDATION (" + (st == 1 ? "up" : "down") + "trend stalled, no new " + (st == 1 ? "high" : "low") + ")" : st == 1 ? "UP" : st == -1 ? "DOWN" : "RANGE (no break of structure yet)"
     string cp_s = st == 1 ? " | control point " + str.tostring(cp, format.mintick) + " (a close below ends it)" : st == -1 ? " | control point " + str.tostring(cp, format.mintick) + " (a close above ends it)" : ""
     string piv = (na(sh2) or na(sl2)) ? "" : " | highs " + str.tostring(sh1, format.mintick) + (sh1 > sh2 ? " > " : " < ") + str.tostring(sh2, format.mintick) + " | lows " + str.tostring(sl1, format.mintick) + (sl1 > sl2 ? " > " : " < ") + str.tostring(sl2, format.mintick)
     nm + " TREND: " + st_s + cp_s + piv
@@ -857,21 +871,21 @@ trend_line(string nm, int st, float cp, float sh1, float sh2, float sl1, float s
 // lookahead on: the readout and the trend score must match what the Mid timeframe chart itself shows, including a
 // swing confirmed by the current week. Without it, a Daily chart sees last week's closed state, so a fresh higher low
 // (AMD 402.10) is missing and the control point lags. Only the last bar's value is used for scoring
-[t_st, t_cp, t_sh1, t_sh2, t_sl1, t_sl2] = request.security(syminfo.tickerid, trend_tf, trend_pack(), lookahead=timeframe.in_seconds(trend_tf) > chart_sec ? barmerge.lookahead_on : barmerge.lookahead_off)
+[t_st, t_cp, t_sh1, t_sh2, t_sl1, t_sl2, t_cons] = request.security(syminfo.tickerid, trend_tf, trend_pack(), lookahead=timeframe.in_seconds(trend_tf) > chart_sec ? barmerge.lookahead_on : barmerge.lookahead_off)
 // the Low timeframe trend (Daily for the Position style), shown on the label when it pulls against the Mid trend
-[l_st, l_cp, l_sh1, l_sh2, l_sl1, l_sl2] = request.security(syminfo.tickerid, TF0, trend_pack(), lookahead=timeframe.in_seconds(TF0) > chart_sec ? barmerge.lookahead_on : barmerge.lookahead_off)
+[l_st, l_cp, l_sh1, l_sh2, l_sl1, l_sl2, l_cons] = request.security(syminfo.tickerid, TF0, trend_pack(), lookahead=timeframe.in_seconds(TF0) > chart_sec ? barmerge.lookahead_on : barmerge.lookahead_off)
 // the High timeframe trend, shown above the others for the bigger picture (not scored)
-[ht_st, ht_cp, ht_sh1, ht_sh2, ht_sl1, ht_sl2] = request.security(syminfo.tickerid, TF2, trend_pack(), lookahead=timeframe.in_seconds(TF2) > chart_sec ? barmerge.lookahead_on : barmerge.lookahead_off)
+[ht_st, ht_cp, ht_sh1, ht_sh2, ht_sl1, ht_sl2, ht_cons] = request.security(syminfo.tickerid, TF2, trend_pack(), lookahead=timeframe.in_seconds(TF2) > chart_sec ? barmerge.lookahead_on : barmerge.lookahead_off)
 
 var table trend_box = table.new(position.top_right, 1, 4, bgcolor=color.new(color.black, 25), border_width=1, border_color=color.new(color.white, 60))
 if barstate.islast and show_trend
     if timeframe.in_seconds(TF2) != timeframe.in_seconds(trend_tf)
-        trend_box.cell(0, 0, trend_line(tf_name(TF2), ht_st, ht_cp, ht_sh1, ht_sh2, ht_sl1, ht_sl2), text_color=color.new(color.white, 15), text_size=size.small, text_halign=text.align_left)
+        trend_box.cell(0, 0, trend_line(tf_name(TF2), ht_st, ht_cp, ht_sh1, ht_sh2, ht_sl1, ht_sl2, ht_cons), text_color=color.new(color.white, 15), text_size=size.small, text_halign=text.align_left)
     else
         trend_box.cell(0, 0, "", text_size=size.small)
-    trend_box.cell(0, 1, trend_line(tf_name(trend_tf), t_st, t_cp, t_sh1, t_sh2, t_sl1, t_sl2), text_color=color.white, text_size=size.small, text_halign=text.align_left)
+    trend_box.cell(0, 1, trend_line(tf_name(trend_tf), t_st, t_cp, t_sh1, t_sh2, t_sl1, t_sl2, t_cons), text_color=color.white, text_size=size.small, text_halign=text.align_left)
     if timeframe.in_seconds(trend_tf) != timeframe.in_seconds(TF0)
-        trend_box.cell(0, 2, trend_line(tf_name(TF0), l_st, l_cp, l_sh1, l_sh2, l_sl1, l_sl2), text_color=color.new(color.white, 30), text_size=size.small, text_halign=text.align_left)
+        trend_box.cell(0, 2, trend_line(tf_name(TF0), l_st, l_cp, l_sh1, l_sh2, l_sl1, l_sl2, l_cons), text_color=color.new(color.white, 30), text_size=size.small, text_halign=text.align_left)
     else
         trend_box.cell(0, 2, "", text_size=size.small)
     // the Low timeframe far below the chart (Scalper on a Daily chart) means hundreds of candles per bar: slow and coarse
@@ -918,9 +932,9 @@ score_zone(Zone z, bool is_supply, float r_top, float r_btm, box opp, string opp
     // trend on arrival: the Mid readout state, unless price must close through the control point to reach the zone
     int s_trend = 2
     if is_supply
-        s_trend := t_st == -1 ? ((na(t_cp) or btm < t_cp) ? 4 : 2) : t_st == 1 ? 0 : 2
+        s_trend := t_cons ? 2 : t_st == -1 ? ((na(t_cp) or btm < t_cp) ? 4 : 2) : t_st == 1 ? 0 : 2
     else
-        s_trend := t_st == 1 ? ((na(t_cp) or top > t_cp) ? 4 : 2) : t_st == -1 ? 0 : 2
+        s_trend := t_cons ? 2 : t_st == 1 ? ((na(t_cp) or top > t_cp) ? 4 : 2) : t_st == -1 ? 0 : 2
     // Low and Mid timeframes pointing opposite ways is noted on the label but does not change the score: the Mid
     // trend on arrival decides. A Daily pullback inside a Weekly uptrend is what brings price to a Daily demand
     bool split = t_st != 0 and l_st != 0 and l_st != t_st
@@ -1029,7 +1043,7 @@ if barstate.islast
             prog_prev := prog
     // fires on every bar close, with an empty setups list when there is no target, so the board can tell a silent alert from a chart with nothing to report
     if alerts_on and barstate.isconfirmed
-        string trend_s = t_st == 1 ? "UP" : t_st == -1 ? "DOWN" : "RANGE"
+        string trend_s = t_cons ? "CONSOLIDATION" : t_st == 1 ? "UP" : t_st == -1 ? "DOWN" : "RANGE"
         string msg = '{"symbol":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","chart_tf":"' + timeframe.period + '","style":"' + (use_custom ? 'Custom' : style) + '","low_tf":"' + tf_name(TF0) + '","mid_tf":"' + tf_name(TF1) + '","high_tf":"' + tf_name(TF2) + '","price":' + num(close) + ',"bar_time":' + str.tostring(time) + ',"trend":"' + trend_s + '","low_trend":"' + (l_st == 1 ? "UP" : l_st == -1 ? "DOWN" : "RANGE") + '","control_point":' + num(t_cp) + ',"range_top":' + num(r_top) + ',"range_btm":' + num(r_btm) + ',"alert_min":' + str.tostring(alert_min) + ',"setups":[' + s_json + (s_json != "" and d_json != "" ? "," : "") + d_json + ']}'
         alert(msg, alert.freq_once_per_bar_close)
 

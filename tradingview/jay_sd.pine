@@ -65,6 +65,18 @@ int alert_min = input.int(14, 'Valid Setup Score', minval=0, maxval=20, group=sc
 bool alerts_on = input.bool(true, 'Send Setup Alerts', group=scan_group, tooltip='Fires alert() on every bar close with both target zones and their scores as JSON (an empty list when there is no target, so the board can see the alert is alive). Create one alert per symbol: condition Jay S&D, Any alert() function call, Once per bar close, with the webhook URL from the Zone Scorecard site. A 1H chart gives an hourly scan.')
 bool show_score = input.bool(true, 'Show Score In Target Label', group=scan_group, tooltip='Adds a SCORE line to each target label with the indicator\'s own point estimate for every check.')
 float approach_pct = input.float(0.8, 'Approach Alert At (share of the way)', minval=0.1, maxval=0.99, step=0.05, group=scan_group, tooltip='Fires the "Price near a target zone" alert condition when price has covered this share of the distance between the two target zones, heading into one of them. Create a separate alert for it with sound on.')
+string ema_group = 'EMA Confluence'
+bool show_ema = input.bool(true, 'Show EMAs', group=ema_group, tooltip='Draws the fast, slow and long EMAs of the chart timeframe. The EMA confluence line on each target label is worked out either way.')
+int ema_fast_len = input.int(21, 'Fast / Slow / Long EMA', minval=1, group=ema_group, inline='ema')
+int ema_slow_len = input.int(50, '', minval=1, group=ema_group, inline='ema')
+int ema_long_len = input.int(200, '', minval=1, group=ema_group, inline='ema')
+bool show_ema_mid = input.bool(true, 'Show Mid Timeframe Slow EMA', group=ema_group, tooltip='Also draws the slow EMA of the Trend (Mid) timeframe as a step line, for example the Weekly 50 EMA on a Daily chart.')
+float ema_near = input.float(0.25, 'EMA At Zone Tolerance (x zone height)', minval=0, step=0.05, group=ema_group, tooltip='An EMA counts as sitting at a target zone when it runs through the zone or within this share of the zone height outside it.')
+color ema_fast_col = input.color(#F5C542, 'Fast / Slow / Long / Mid Colors', group=ema_group, inline='emac')
+color ema_slow_col = input.color(#4FC3F7, '', group=ema_group, inline='emac')
+color ema_long_col = input.color(#B39DDB, '', group=ema_group, inline='emac')
+color ema_mid_col = input.color(#FF9800, '', group=ema_group, inline='emac')
+
 string visual_group = 'Visual Settings'
 color sup_d_col = input.color(#FF6B6B, 'Low TF Supply / Demand', group=visual_group, inline='sd')
 color sup_w_col = input.color(#E03131, 'Mid TF Supply / Demand', group=visual_group, inline='sw')
@@ -877,7 +889,50 @@ trend_line(string nm, int st, float cp, float sh1, float sh2, float sl1, float s
 // the High timeframe trend, shown above the others for the bigger picture (not scored)
 [ht_st, ht_cp, ht_sh1, ht_sh2, ht_sl1, ht_sl2, ht_cons] = request.security(syminfo.tickerid, TF2, trend_pack(), lookahead=timeframe.in_seconds(TF2) > chart_sec ? barmerge.lookahead_on : barmerge.lookahead_off)
 
-var table trend_box = table.new(position.top_right, 1, 4, bgcolor=color.new(color.black, 25), border_width=1, border_color=color.new(color.white, 60))
+//-----------------------------------------------------------------------------
+// EMA CONFLUENCE
+// Extra confluence for the target zones, not part of the 20 point score: an EMA sitting at the zone,
+// the Mid timeframe EMAs pointing the trade's way, and price on the trade's side of the long EMA.
+//-----------------------------------------------------------------------------
+float ema_f = ta.ema(close, ema_fast_len)
+float ema_s = ta.ema(close, ema_slow_len)
+float ema_l = ta.ema(close, ema_long_len)
+
+ema_pack() =>
+    [close, ta.ema(close, ema_fast_len), ta.ema(close, ema_slow_len)]
+
+// no lookahead: the Mid timeframe EMA line must not show a level the higher candle had not reached yet
+[em_c, em_f, em_s] = request.security(syminfo.tickerid, trend_tf, ema_pack())
+// bull: close above the slow EMA and the fast EMA above it. Bear: the mirror. Anything else is mixed
+int em_bias = na(em_s) or na(em_f) ? 0 : em_c > em_s and em_f > em_s ? 1 : em_c < em_s and em_f < em_s ? -1 : 0
+
+plot(show_ema ? ema_f : na, 'Fast EMA', color=ema_fast_col, linewidth=1)
+plot(show_ema ? ema_s : na, 'Slow EMA', color=ema_slow_col, linewidth=1)
+plot(show_ema ? ema_l : na, 'Long EMA', color=ema_long_col, linewidth=2)
+plot(show_ema_mid and timeframe.in_seconds(trend_tf) > chart_sec ? em_s : na, 'Mid Timeframe Slow EMA', color=ema_mid_col, linewidth=2, style=plot.style_stepline)
+
+ema_bias_s(int b) =>
+    b == 1 ? "bull" : b == -1 ? "bear" : "mixed"
+
+// returns the number of checks met (0 to 3) and the label line
+ema_conf(Zone z, bool is_supply) =>
+    float top = z.b.get_top()
+    float btm = z.b.get_bottom()
+    float pad = (top - btm) * ema_near
+    array<float> lv = array.from(ema_f, ema_s, ema_l, em_s)
+    array<string> nm = array.from(str.tostring(ema_fast_len), str.tostring(ema_slow_len), str.tostring(ema_long_len), tf_tag(trend_tf) + " " + str.tostring(ema_slow_len))
+    string at = ""
+    for i = 0 to 3
+        float v = lv.get(i)
+        if not na(v) and v <= top + pad and v >= btm - pad
+            at := at == "" ? nm.get(i) : at + ", " + nm.get(i)
+    bool mid_ok = em_bias == (is_supply ? -1 : 1)
+    bool long_ok = not na(ema_l) and (is_supply ? close < ema_l : close > ema_l)
+    int n = (at != "" ? 1 : 0) + (mid_ok ? 1 : 0) + (long_ok ? 1 : 0)
+    string txt = "EMA " + str.tostring(n) + "/3 | " + (at != "" ? at + " EMA at zone" : "no EMA at zone") + " | " + tf_name(trend_tf) + " EMAs " + ema_bias_s(em_bias) + " | price " + (close > ema_l ? "above" : "below") + " " + str.tostring(ema_long_len) + " EMA"
+    [n, txt]
+
+var table trend_box = table.new(position.top_right, 1, 5, bgcolor=color.new(color.black, 25), border_width=1, border_color=color.new(color.white, 60))
 if barstate.islast and show_trend
     if timeframe.in_seconds(TF2) != timeframe.in_seconds(trend_tf)
         trend_box.cell(0, 0, trend_line(tf_name(TF2), ht_st, ht_cp, ht_sh1, ht_sh2, ht_sl1, ht_sl2, ht_cons), text_color=color.new(color.white, 15), text_size=size.small, text_halign=text.align_left)
@@ -889,8 +944,9 @@ if barstate.islast and show_trend
     else
         trend_box.cell(0, 2, "", text_size=size.small)
     // the Low timeframe far below the chart (Scalper on a Daily chart) means hundreds of candles per bar: slow and coarse
+    trend_box.cell(0, 3, tf_name(trend_tf) + " EMAs: " + str.upper(ema_bias_s(em_bias)) + " (" + str.tostring(ema_fast_len) + " " + (em_f > em_s ? "above" : "below") + " " + str.tostring(ema_slow_len) + ", close " + (em_c > em_s ? "above" : "below") + ") | price " + (close > ema_l ? "above" : "below") + " " + str.tostring(ema_long_len) + " EMA", text_color=em_bias == 1 ? color.new(#2ECC71, 10) : em_bias == -1 ? color.new(#FF6B6B, 10) : color.new(color.white, 30), text_size=size.small, text_halign=text.align_left)
     if timeframe.in_seconds(TF0) * 100 < chart_sec
-        trend_box.cell(0, 3, "Chart timeframe is far above the Low timeframe (" + tf_name(TF0) + "). Drop the chart to " + tf_name(TF1) + " or lower for reliable zones.", text_color=color.orange, text_size=size.small, text_halign=text.align_left)
+        trend_box.cell(0, 4, "Chart timeframe is far above the Low timeframe (" + tf_name(TF0) + "). Drop the chart to " + tf_name(TF1) + " or lower for reliable zones.", text_color=color.orange, text_size=size.small, text_halign=text.align_left)
 
 //-----------------------------------------------------------------------------
 // SETUP SCORE AND ALERTS
@@ -967,10 +1023,10 @@ score_line(int total, int s_range, int s_time, int s_trend, int s_move, int s_os
 num(float x) =>
     na(x) ? "null" : str.tostring(x, "#.####")
 
-setup_json(Zone z, bool is_supply, int slot, string tag, int total, int s_range, int s_time, int s_trend, int s_move, int s_os, int s_pur, int s_rrr, float rrr, float ratio, float pos, string opp_nm, bool go, string status) =>
+setup_json(Zone z, bool is_supply, int slot, string tag, int total, int s_range, int s_time, int s_trend, int s_move, int s_os, int s_pur, int s_rrr, float rrr, float ratio, float pos, string opp_nm, bool go, string status, int ema_n) =>
     box b = z.b
     [w, tr, nm] = zone_style(slot)
-    '{"side":"' + (is_supply ? "SELL" : "BUY") + '","zone":"' + nm + (is_supply ? " SUPPLY " : " DEMAND ") + str.tostring(b.get_bottom(), format.mintick) + " - " + str.tostring(b.get_top(), format.mintick) + '","top":' + num(b.get_top()) + ',"btm":' + num(b.get_bottom()) + ',"backing":"' + str.trim(tag) + '","base":' + str.tostring(z.base_n) + ',"touches":' + str.tostring(z.touches) + ',"depth":' + num(z.depth) + ',"os":' + (z.os ? "true" : "false") + ',"gap":' + (z.gap ? "true" : "false") + ',"score":' + str.tostring(total) + ',"checks":{"range":' + str.tostring(s_range) + ',"time":' + str.tostring(s_time) + ',"trend":' + str.tostring(s_trend) + ',"move":' + str.tostring(s_move) + ',"os":' + str.tostring(s_os) + ',"purity":' + str.tostring(s_pur) + ',"rrr":' + str.tostring(s_rrr) + '},"rrr_ratio":' + num(rrr) + ',"rrr_target":"' + opp_nm + '","gap_out":' + (z.gap_out ? "true" : "false") + ',"go":' + (go ? "true" : "false") + ',"entry":"' + status + '"' + ',"move_ratio":' + num(ratio) + ',"range_pos":' + num(pos) + '}'
+    '{"side":"' + (is_supply ? "SELL" : "BUY") + '","zone":"' + nm + (is_supply ? " SUPPLY " : " DEMAND ") + str.tostring(b.get_bottom(), format.mintick) + " - " + str.tostring(b.get_top(), format.mintick) + '","top":' + num(b.get_top()) + ',"btm":' + num(b.get_bottom()) + ',"backing":"' + str.trim(tag) + '","base":' + str.tostring(z.base_n) + ',"touches":' + str.tostring(z.touches) + ',"depth":' + num(z.depth) + ',"os":' + (z.os ? "true" : "false") + ',"gap":' + (z.gap ? "true" : "false") + ',"score":' + str.tostring(total) + ',"checks":{"range":' + str.tostring(s_range) + ',"time":' + str.tostring(s_time) + ',"trend":' + str.tostring(s_trend) + ',"move":' + str.tostring(s_move) + ',"os":' + str.tostring(s_os) + ',"purity":' + str.tostring(s_pur) + ',"rrr":' + str.tostring(s_rrr) + '},"rrr_ratio":' + num(rrr) + ',"rrr_target":"' + opp_nm + '","gap_out":' + (z.gap_out ? "true" : "false") + ',"go":' + (go ? "true" : "false") + ',"entry":"' + status + '"' + ',"move_ratio":' + num(ratio) + ',"range_pos":' + num(pos) + ',"ema":' + str.tostring(ema_n) + '}'
 
 // approach: how far price has travelled between the two target zones toward the one ahead
 var float prog_prev = na
@@ -1013,8 +1069,9 @@ if barstate.islast
                 opp_nm := ""
         [tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, spl] = score_zone(tgt_sup, true, r_top, r_btm, opp, opp_nm)
         [s_go, s_ent] = entry_state(tgt_sup, tot)
-        mark_target(tgt_sup_slot, true, tgt_sup, tgt_sup_tag, show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, r_top, r_btm, r_top_nm, r_btm_nm, spl) : "", s_ent, s_go)
-        s_json := setup_json(tgt_sup, true, tgt_sup_slot, tgt_sup_tag, tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, s_go, s_ent)
+        [s_en, s_et] = ema_conf(tgt_sup, true)
+        mark_target(tgt_sup_slot, true, tgt_sup, tgt_sup_tag, (show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, r_top, r_btm, r_top_nm, r_btm_nm, spl) + "\n" : "") + s_et, s_ent, s_go)
+        s_json := setup_json(tgt_sup, true, tgt_sup_slot, tgt_sup_tag, tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, s_go, s_ent, s_en)
     if not na(tgt_dem)
         box opp = na
         string opp_nm = ""
@@ -1030,8 +1087,9 @@ if barstate.islast
                 opp_nm := ""
         [tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, spl] = score_zone(tgt_dem, false, r_top, r_btm, opp, opp_nm)
         [d_go, d_ent] = entry_state(tgt_dem, tot)
-        mark_target(tgt_dem_slot, false, tgt_dem, tgt_dem_tag, show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, r_top, r_btm, r_top_nm, r_btm_nm, spl) : "", d_ent, d_go)
-        d_json := setup_json(tgt_dem, false, tgt_dem_slot, tgt_dem_tag, tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, d_go, d_ent)
+        [d_en, d_et] = ema_conf(tgt_dem, false)
+        mark_target(tgt_dem_slot, false, tgt_dem, tgt_dem_tag, (show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, r_top, r_btm, r_top_nm, r_btm_nm, spl) + "\n" : "") + d_et, d_ent, d_go)
+        d_json := setup_json(tgt_dem, false, tgt_dem_slot, tgt_dem_tag, tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, d_go, d_ent, d_en)
     if not na(tgt_sup) and not na(tgt_dem)
         float s_edge = tgt_sup.b.get_bottom()
         float d_edge = tgt_dem.b.get_top()

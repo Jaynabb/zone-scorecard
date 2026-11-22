@@ -426,16 +426,14 @@ create_zone(array<Zone> zones, bool is_supply, float z_top, float z_btm, int lef
     bool ok = not na(top) and not na(btm)
     if (top - btm) > max_height_mult * yard_tf
         ok := false
-    // A zone read from the timeframe's own base replaces an overlapping zone when that zone is a drill-down guess,
-    // a later base, or an older zone that price has already come back to test. A fresh base formed on the retest
-    // of an old zone is the zone to trade from then on (the sheet marks the newer, tighter base). An untested older
-    // zone is kept and the newcomer skipped: a base formed during the first move out of a zone is a continuation
-    // inside that move, not a new zone of the same price
+    // A zone read from the timeframe's own base replaces an overlapping zone only when that zone is a drill-down
+    // guess or a later base. An older zone that is still valid (never closed through) is kept, retested or not,
+    // and the newcomer is skipped: a base formed inside an existing zone is part of that zone, not a new one
     if ok and not from_lower and zones.size() > 0
         for i = zones.size() - 1 to 0
             Zone oz = zones.get(i)
             bool over = top >= oz.b.get_bottom() and btm <= oz.b.get_top()
-            if over and (oz.via_lower or oz.lt >= left_time or oz.touches > 0)
+            if over and (oz.via_lower or oz.lt >= left_time)
                 oz.b.delete()
                 zones.remove(i)
     if ok and not zones.overlaps(top, btm)

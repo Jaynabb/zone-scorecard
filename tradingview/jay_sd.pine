@@ -18,6 +18,8 @@ bool use_custom = style == 'Custom' or timeframe.in_seconds(tf_low_in) != timefr
 string TF0 = use_custom ? tf_low_in : style == 'Position trader' ? 'D' : style == 'Swing trader' ? '240' : style == 'Day trader' ? '15' : '5'
 string TF1 = use_custom ? tf_mid_in : style == 'Position trader' ? 'W' : style == 'Swing trader' ? 'D' : style == 'Day trader' ? '60' : '15'
 string TF2 = use_custom ? tf_high_in : style == 'Position trader' ? 'M' : style == 'Swing trader' ? 'W' : style == 'Day trader' ? '240' : '60'
+if barstate.isfirst and not (timeframe.in_seconds(TF0) < timeframe.in_seconds(TF1) and timeframe.in_seconds(TF1) < timeframe.in_seconds(TF2))
+    runtime.error('Custom timeframes must go Low < Mid < High, for example 5 minutes / 30 minutes / 2 hours.')
 
 // Readable names: DAILY, WEEKLY, MONTHLY, 4H, 15M ...
 tf_name(string tf) =>
@@ -30,7 +32,7 @@ tf_tag(string tf) =>
     sec == timeframe.in_seconds("D") ? "D" : sec == timeframe.in_seconds("W") ? "W" : sec == timeframe.in_seconds("M") ? "M" : sec % 3600 == 0 ? str.tostring(sec / 3600) + "H" : str.tostring(sec / 60) + "M"
 
 string poi_group = 'Zone Settings'
-int max_zones = input.int(60, 'Max Zones Kept Per Timeframe', minval=2, group=poi_group, tooltip='Unbroken zones kept in memory per timeframe and side; the oldest is forgotten when the list is full. Only the nearest ones are drawn, see Zone Filters. Keep this high so an old base far below or above price is still there as a target when price finally returns to it.')
+int max_zones = input.int(60, 'Max Zones Kept Per Timeframe', minval=2, maxval=80, group=poi_group, tooltip='Unbroken zones kept in memory per timeframe and side; the oldest is forgotten when the list is full. Only the nearest ones are drawn, see Zone Filters. Keep this high so an old base far below or above price is still there as a target when price finally returns to it.')
 int typ_len = input.int(20, 'Typical Body Lookback', minval=5, group=poi_group, tooltip='Number of candles used to measure the typical candle body (the median, so a few crash candles do not distort it). Every size rule below is a multiple of this typical body, so the script scales itself to any market and timeframe.')
 float impulse_mult = input.float(1.0, 'Impulse Min Body (x typical body)', minval=0.25, step=0.25, group=poi_group, tooltip='Floor for an impulse candle: its body must be at least this many typical bodies and move away from the base. The real test is relative: every base candle must be small compared with the impulse, see Base Candle Max.')
 float base_mult = input.float(0.5, 'Base Candle Max (x impulse body)', minval=0.1, maxval=1.0, step=0.1, group=poi_group, tooltip='A candle counts as part of the base only if its body is at most this fraction of the impulse body. 0.5 means the impulse is at least twice every base candle.')
@@ -291,12 +293,14 @@ string tf_w_hi = mode_w == 1 ? TF1 : timeframe.period
 string tf_m_hi = mode_m == 1 ? TF2 : timeframe.period
 string tf_d_lo = mode_d == 2 ? TF0 : timeframe.period
 string tf_w_lo = mode_w == 2 ? TF1 : timeframe.period
+string tf_m_lo = mode_m == 2 ? TF2 : timeframe.period
 // Lower-timeframe requests return 24 arrays per bar, which TradingView lists as the heaviest thing a script can hold in
 // memory. On a chart that needs no drill-down (every alert chart) they are cut to a handful of bars so the alert server
 // does not run out of memory and stop the alert with a calculation error.
 // (computed inline because calc_bars_count needs a simple int, and a user function would return a series)
 int lo_bars_d = timeframe.in_seconds(TF0) < chart_sec ? 100000 : 5
 int lo_bars_w = timeframe.in_seconds(TF1) < chart_sec ? 100000 : 5
+int lo_bars_m = timeframe.in_seconds(TF2) < chart_sec ? 100000 : 5
 
 [d_sf, d_st, d_sb, d_stm, d_sn, d_si, d_df, d_dt, d_db, d_dtm, d_dn, d_di, d_c, d_h, d_l, d_a, d_stn, d_st0, d_st1, d_stx, d_dtn, d_dt0, d_dt1, d_dtx, d_sg, d_dg, d_so, d_do] = request.security(syminfo.tickerid, tf_d_hi, tf_pack())
 [w_sf, w_st, w_sb, w_stm, w_sn, w_si, w_df, w_dt, w_db, w_dtm, w_dn, w_di, w_c, w_h, w_l, w_a, w_stn, w_st0, w_st1, w_stx, w_dtn, w_dt0, w_dt1, w_dtx, w_sg, w_dg, w_so, w_do] = request.security(syminfo.tickerid, tf_w_hi, tf_pack())
@@ -304,6 +308,7 @@ int lo_bars_w = timeframe.in_seconds(TF1) < chart_sec ? 100000 : 5
 
 [d_sf_a, d_st_a, d_sb_a, d_stm_a, d_sn_a, d_si_a, d_df_a, d_dt_a, d_db_a, d_dtm_a, d_dn_a, d_di_a, d_c_a, d_h_a, d_l_a, d_a_a, d_stn_a, d_st0_a, d_st1_a, d_stx_a, d_dtn_a, d_dt0_a, d_dt1_a, d_dtx_a, d_sg_a, d_dg_a, d_so_a, d_do_a] = request.security_lower_tf(syminfo.tickerid, tf_d_lo, tf_pack(), calc_bars_count=lo_bars_d)
 [w_sf_a, w_st_a, w_sb_a, w_stm_a, w_sn_a, w_si_a, w_df_a, w_dt_a, w_db_a, w_dtm_a, w_dn_a, w_di_a, w_c_a, w_h_a, w_l_a, w_a_a, w_stn_a, w_st0_a, w_st1_a, w_stx_a, w_dtn_a, w_dt0_a, w_dt1_a, w_dtx_a, w_sg_a, w_dg_a, w_so_a, w_do_a] = request.security_lower_tf(syminfo.tickerid, tf_w_lo, tf_pack(), calc_bars_count=lo_bars_w)
+[m_sf_a, m_st_a, m_sb_a, m_stm_a, m_sn_a, m_si_a, m_df_a, m_dt_a, m_db_a, m_dtm_a, m_dn_a, m_di_a, m_c_a, m_h_a, m_l_a, m_a_a, m_stn_a, m_st0_a, m_st1_a, m_stx_a, m_dtn_a, m_dt0_a, m_dt1_a, m_dtx_a, m_sg_a, m_dg_a, m_so_a, m_do_a] = request.security_lower_tf(syminfo.tickerid, tf_m_lo, tf_pack(), calc_bars_count=lo_bars_m)
 
 //-----------------------------------------------------------------------------
 // ZONE FUNCTIONS
@@ -697,8 +702,8 @@ nearest_zone_box(array<Zone> zones, bool is_supply) =>
 //-----------------------------------------------------------------------------
 process_slot(0, mode_d, show_d, sup_d, dem_d, d_sf, d_st, d_sb, d_stm, d_sn, d_si, d_df, d_dt, d_db, d_dtm, d_dn, d_di, d_c, d_h, d_l, d_a, d_sf_a, d_st_a, d_sb_a, d_stm_a, d_sn_a, d_si_a, d_df_a, d_dt_a, d_db_a, d_dtm_a, d_dn_a, d_di_a, d_c_a, d_h_a, d_l_a, d_a_a, d_stn, d_st0, d_st1, d_stx, d_dtn, d_dt0, d_dt1, d_dtx, d_sg, d_dg, d_sg_a, d_dg_a, d_so, d_do, d_so_a, d_do_a)
 process_slot(1, mode_w, show_w, sup_w, dem_w, w_sf, w_st, w_sb, w_stm, w_sn, w_si, w_df, w_dt, w_db, w_dtm, w_dn, w_di, w_c, w_h, w_l, w_a, w_sf_a, w_st_a, w_sb_a, w_stm_a, w_sn_a, w_si_a, w_df_a, w_dt_a, w_db_a, w_dtm_a, w_dn_a, w_di_a, w_c_a, w_h_a, w_l_a, w_a_a, w_stn, w_st0, w_st1, w_stx, w_dtn, w_dt0, w_dt1, w_dtx, w_sg, w_dg, w_sg_a, w_dg_a, w_so, w_do, w_so_a, w_do_a)
-// Monthly is never lower than a Daily or Weekly chart, so it reuses the Weekly lower-tf arrays, which are ignored unless mode is 2
-process_slot(2, mode_m, show_m, sup_m, dem_m, m_sf, m_st, m_sb, m_stm, m_sn, m_si, m_df, m_dt, m_db, m_dtm, m_dn, m_di, m_c, m_h, m_l, m_a, w_sf_a, w_st_a, w_sb_a, w_stm_a, w_sn_a, w_si_a, w_df_a, w_dt_a, w_db_a, w_dtm_a, w_dn_a, w_di_a, w_c_a, w_h_a, w_l_a, w_a_a, m_stn, m_st0, m_st1, m_stx, m_dtn, m_dt0, m_dt1, m_dtx, m_sg, m_dg, w_sg_a, w_dg_a, m_so, m_do, w_so_a, w_do_a)
+// the High timeframe has its own lower-tf arrays: on intraday styles it can sit below the chart (a 4H High on a Daily chart)
+process_slot(2, mode_m, show_m, sup_m, dem_m, m_sf, m_st, m_sb, m_stm, m_sn, m_si, m_df, m_dt, m_db, m_dtm, m_dn, m_di, m_c, m_h, m_l, m_a, m_sf_a, m_st_a, m_sb_a, m_stm_a, m_sn_a, m_si_a, m_df_a, m_dt_a, m_db_a, m_dtm_a, m_dn_a, m_di_a, m_c_a, m_h_a, m_l_a, m_a_a, m_stn, m_st0, m_st1, m_stx, m_dtn, m_dt0, m_dt1, m_dtx, m_sg, m_dg, m_sg_a, m_dg_a, m_so, m_do, m_so_a, m_do_a)
 
 if barstate.islast
     // size the boxes once, on the last bar, so no box is ever positioned off the start of the chart
@@ -827,9 +832,9 @@ trend_line(string nm, int st, float cp, float sh1, float sh2, float sl1, float s
 // lookahead on: the readout and the trend score must match what the Mid timeframe chart itself shows, including a
 // swing confirmed by the current week. Without it, a Daily chart sees last week's closed state, so a fresh higher low
 // (AMD 402.10) is missing and the control point lags. Only the last bar's value is used for scoring
-[t_st, t_cp, t_sh1, t_sh2, t_sl1, t_sl2] = request.security(syminfo.tickerid, trend_tf, trend_pack(), lookahead=barmerge.lookahead_on)
+[t_st, t_cp, t_sh1, t_sh2, t_sl1, t_sl2] = request.security(syminfo.tickerid, trend_tf, trend_pack(), lookahead=timeframe.in_seconds(trend_tf) > chart_sec ? barmerge.lookahead_on : barmerge.lookahead_off)
 // the Low timeframe trend (Daily for the Position style), shown on the label when it pulls against the Mid trend
-[l_st, l_cp, l_sh1, l_sh2, l_sl1, l_sl2] = request.security(syminfo.tickerid, TF0, trend_pack(), lookahead=barmerge.lookahead_on)
+[l_st, l_cp, l_sh1, l_sh2, l_sl1, l_sl2] = request.security(syminfo.tickerid, TF0, trend_pack(), lookahead=timeframe.in_seconds(TF0) > chart_sec ? barmerge.lookahead_on : barmerge.lookahead_off)
 
 var table trend_box = table.new(position.top_right, 1, 2, bgcolor=color.new(color.black, 25), border_width=1, border_color=color.new(color.white, 60))
 if barstate.islast and show_trend
@@ -991,10 +996,10 @@ if barstate.islast
     // fires on every bar close, with an empty setups list when there is no target, so the board can tell a silent alert from a chart with nothing to report
     if alerts_on and barstate.isconfirmed
         string trend_s = t_st == 1 ? "UP" : t_st == -1 ? "DOWN" : "RANGE"
-        string msg = '{"symbol":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","chart_tf":"' + timeframe.period + '","style":"' + style + '","low_tf":"' + tf_name(TF0) + '","mid_tf":"' + tf_name(TF1) + '","high_tf":"' + tf_name(TF2) + '","price":' + num(close) + ',"bar_time":' + str.tostring(time) + ',"trend":"' + trend_s + '","low_trend":"' + (l_st == 1 ? "UP" : l_st == -1 ? "DOWN" : "RANGE") + '","control_point":' + num(t_cp) + ',"range_top":' + num(r_top) + ',"range_btm":' + num(r_btm) + ',"alert_min":' + str.tostring(alert_min) + ',"setups":[' + s_json + (s_json != "" and d_json != "" ? "," : "") + d_json + ']}'
+        string msg = '{"symbol":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","chart_tf":"' + timeframe.period + '","style":"' + (use_custom ? 'Custom' : style) + '","low_tf":"' + tf_name(TF0) + '","mid_tf":"' + tf_name(TF1) + '","high_tf":"' + tf_name(TF2) + '","price":' + num(close) + ',"bar_time":' + str.tostring(time) + ',"trend":"' + trend_s + '","low_trend":"' + (l_st == 1 ? "UP" : l_st == -1 ? "DOWN" : "RANGE") + '","control_point":' + num(t_cp) + ',"range_top":' + num(r_top) + ',"range_btm":' + num(r_btm) + ',"alert_min":' + str.tostring(alert_min) + ',"setups":[' + s_json + (s_json != "" and d_json != "" ? "," : "") + d_json + ']}'
         alert(msg, alert.freq_once_per_bar_close)
 
-alertcondition(approach_now, "Price near a target zone", "{{ticker}}: price has covered 80% of the way to the next target zone")
+alertcondition(approach_now, "Price near a target zone", "{{ticker}}: price has covered most of the way to the next target zone")
 
 //-----------------------------------------------------------------------------
 // ZIG ZAG AND SWING LABELS (chart timeframe only)

@@ -84,7 +84,7 @@ color highlight_color = input.color(color.white, 'Nearest Zone Outline', group=v
 int target_tr = input.int(40, 'Target Zone Fill Transparency', minval=0, maxval=100, group=visual_group, tooltip='The two target zones (white outline) use this fill transparency instead of their timeframe value, so they stand out boldly.')
 color label_color = input.color(color.white, 'Text Color', group=visual_group)
 bool show_zigzag = input.bool(false, 'Show Zig Zag (chart timeframe)', group=visual_group)
-bool show_trend = input.bool(true, 'Show Trend Readout', group=visual_group, tooltip='A box in the top right corner with the trend state of the Trend Timeframe (the Mid timeframe) and of the Low timeframe, read from the zig zag swings with the 3 segment rule: higher highs and higher lows is UP, lower highs and lower lows is DOWN, anything else is RANGE. The control point is the last higher low (up) or lower high (down); a close through it ends the trend.')
+bool show_trend = input.bool(true, 'Show Trend Readout', group=visual_group, tooltip='A box in the top right corner with the trend state of the High timeframe (top, for context), the Trend Timeframe (the Mid timeframe, scored) and the Low timeframe, read from the zig zag swings with the 3 segment rule: higher highs and higher lows is UP, lower highs and lower lows is DOWN, anything else is RANGE. The control point is the last higher low (up) or lower high (down); a close through it ends the trend.')
 bool trend_auto = input.bool(true, 'Trend Readout Uses The Mid Timeframe', group=visual_group, tooltip='On: the readout scores the trend of the style\'s Mid timeframe. Off: it uses the Trend Timeframe below.')
 string trend_tf_in = input.timeframe('W', 'Trend Timeframe (when not automatic)', group=visual_group)
 string trend_tf = trend_auto ? TF1 : trend_tf_in
@@ -860,17 +860,23 @@ trend_line(string nm, int st, float cp, float sh1, float sh2, float sl1, float s
 [t_st, t_cp, t_sh1, t_sh2, t_sl1, t_sl2] = request.security(syminfo.tickerid, trend_tf, trend_pack(), lookahead=timeframe.in_seconds(trend_tf) > chart_sec ? barmerge.lookahead_on : barmerge.lookahead_off)
 // the Low timeframe trend (Daily for the Position style), shown on the label when it pulls against the Mid trend
 [l_st, l_cp, l_sh1, l_sh2, l_sl1, l_sl2] = request.security(syminfo.tickerid, TF0, trend_pack(), lookahead=timeframe.in_seconds(TF0) > chart_sec ? barmerge.lookahead_on : barmerge.lookahead_off)
+// the High timeframe trend, shown above the others for the bigger picture (not scored)
+[ht_st, ht_cp, ht_sh1, ht_sh2, ht_sl1, ht_sl2] = request.security(syminfo.tickerid, TF2, trend_pack(), lookahead=timeframe.in_seconds(TF2) > chart_sec ? barmerge.lookahead_on : barmerge.lookahead_off)
 
-var table trend_box = table.new(position.top_right, 1, 3, bgcolor=color.new(color.black, 25), border_width=1, border_color=color.new(color.white, 60))
+var table trend_box = table.new(position.top_right, 1, 4, bgcolor=color.new(color.black, 25), border_width=1, border_color=color.new(color.white, 60))
 if barstate.islast and show_trend
-    trend_box.cell(0, 0, trend_line(tf_name(trend_tf), t_st, t_cp, t_sh1, t_sh2, t_sl1, t_sl2), text_color=color.white, text_size=size.small, text_halign=text.align_left)
-    if timeframe.in_seconds(trend_tf) != timeframe.in_seconds(TF0)
-        trend_box.cell(0, 1, trend_line(tf_name(TF0), l_st, l_cp, l_sh1, l_sh2, l_sl1, l_sl2), text_color=color.new(color.white, 30), text_size=size.small, text_halign=text.align_left)
+    if timeframe.in_seconds(TF2) != timeframe.in_seconds(trend_tf)
+        trend_box.cell(0, 0, trend_line(tf_name(TF2), ht_st, ht_cp, ht_sh1, ht_sh2, ht_sl1, ht_sl2), text_color=color.new(color.white, 15), text_size=size.small, text_halign=text.align_left)
     else
-        trend_box.cell(0, 1, "", text_size=size.small)
+        trend_box.cell(0, 0, "", text_size=size.small)
+    trend_box.cell(0, 1, trend_line(tf_name(trend_tf), t_st, t_cp, t_sh1, t_sh2, t_sl1, t_sl2), text_color=color.white, text_size=size.small, text_halign=text.align_left)
+    if timeframe.in_seconds(trend_tf) != timeframe.in_seconds(TF0)
+        trend_box.cell(0, 2, trend_line(tf_name(TF0), l_st, l_cp, l_sh1, l_sh2, l_sl1, l_sl2), text_color=color.new(color.white, 30), text_size=size.small, text_halign=text.align_left)
+    else
+        trend_box.cell(0, 2, "", text_size=size.small)
     // the Low timeframe far below the chart (Scalper on a Daily chart) means hundreds of candles per bar: slow and coarse
     if timeframe.in_seconds(TF0) * 100 < chart_sec
-        trend_box.cell(0, 2, "Chart timeframe is far above the Low timeframe (" + tf_name(TF0) + "). Drop the chart to " + tf_name(TF1) + " or lower for reliable zones.", text_color=color.orange, text_size=size.small, text_halign=text.align_left)
+        trend_box.cell(0, 3, "Chart timeframe is far above the Low timeframe (" + tf_name(TF0) + "). Drop the chart to " + tf_name(TF1) + " or lower for reliable zones.", text_color=color.orange, text_size=size.small, text_halign=text.align_left)
 
 //-----------------------------------------------------------------------------
 // SETUP SCORE AND ALERTS

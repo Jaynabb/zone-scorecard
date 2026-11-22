@@ -779,12 +779,13 @@ minor_add(array<box> arr, bool is_supply, float top, float btm, int t) =>
         if arr.size() > 6
             arr.pop().delete()
 
-// a candle closing through the far edge ends a minor zone, like a full one
+// a candle closing through the far edge ends a minor zone, like a full one. A full zone that forms later on the
+// same price replaces it
 minor_update(array<box> arr, bool is_supply) =>
     if arr.size() > 0
         for i = arr.size() - 1 to 0
             box b = arr.get(i)
-            if is_supply ? close > b.get_top() : close < b.get_bottom()
+            if (is_supply ? close > b.get_top() : close < b.get_bottom()) or minor_clash(sup_d, b.get_top(), b.get_bottom()) or minor_clash(dem_d, b.get_top(), b.get_bottom())
                 b.delete()
                 arr.remove(i)
 

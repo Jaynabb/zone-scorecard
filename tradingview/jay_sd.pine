@@ -70,6 +70,7 @@ bool show_ema = input.bool(true, 'Show EMAs', group=ema_group, tooltip='Draws th
 int ema_fast_len = input.int(9, 'Fast / Mid / Slow EMA', minval=1, group=ema_group, inline='ema', tooltip='Backtested 2026-11-22 on EURUSD, GBPUSD, gold, BTC and NQ: 9 / 21 / 50 on the Daily chart gave the best results for the full candle rule (about 59% win rate at 1:1 and +0.25R per trade at 1:2, against about breakeven for random entries). The edge was small on 1H and none on 5m.')
 int ema_slow_len = input.int(21, '', minval=1, group=ema_group, inline='ema')
 int ema_long_len = input.int(50, '', minval=1, group=ema_group, inline='ema')
+bool ema_required = input.bool(true, 'Require EMA Agreement For GO', group=ema_group, tooltip='On: a target zone is only a GO when the standing EMA signal points its way (buy for demand, sell for supply). Otherwise the label says WAIT FOR EMA.')
 bool show_ema_sig = input.bool(true, 'Mark EMA Buy / Sell Candles', group=ema_group, tooltip='A small triangle under the first full candle (wicks included) that closes above all three EMAs (buy) and over the first full candle below all three (sell).')
 color ema_fast_col = input.color(#F5C542, 'Fast / Mid / Slow Colors', group=ema_group, inline='emac')
 color ema_slow_col = input.color(#4FC3F7, '', group=ema_group, inline='emac')
@@ -89,7 +90,7 @@ int width_d = input.int(30, 'Low TF Zone Width (bars)', minval=2, group=visual_g
 int width_w = input.int(60, 'Mid TF Zone Width (bars)', minval=2, group=visual_group)
 int width_m = input.int(90, 'High TF Zone Width (bars)', minval=2, group=visual_group)
 bool anchor_base = input.bool(true, 'Anchor Zones To Their Base Candle', group=visual_group, tooltip='On: each zone starts at the base candle it was built from, like the original drawing. Off: zones use the widths above and end at the right margin.')
-color go_color = input.color(#2ECC71, 'Go Label Color', group=visual_group, tooltip='The target label turns this color when the trade is a go: score at or above the valid score, and price is retesting the zone now (or the impulse gapped away from the base, the one case that needs no retest).')
+color go_color = input.color(#2ECC71, 'Go Label Color', group=visual_group, tooltip='The target label turns this color when the trade is a go: score at or above the valid score, and price is retesting the zone now (or the impulse gapped away from the base, the one case that needs no retest), and the EMA signal agrees when Require EMA Agreement is on.')
 color highlight_color = input.color(color.white, 'Nearest Zone Outline', group=visual_group)
 int target_tr = input.int(40, 'Target Zone Fill Transparency', minval=0, maxval=100, group=visual_group, tooltip='The two target zones (white outline) use this fill transparency instead of their timeframe value, so they stand out boldly.')
 color label_color = input.color(color.white, 'Text Color', group=visual_group)
@@ -1007,10 +1008,15 @@ score_zone(Zone z, bool is_supply, float r_top, float r_btm, box opp, string opp
 
 // Entry timing, the sheet's rule: a trade is only taken on the retest of the zone, except when the impulse gapped away
 // from the base, which allows an entry before any retest. A go needs the score as well.
-entry_state(Zone z, int total) =>
+// ema_n: 1 when the standing EMA signal points the zone's way (see ema_conf). With Require EMA Agreement on,
+// a zone whose timing is right but whose EMA signal is not with it waits for the EMA
+entry_state(Zone z, int total, int ema_n) =>
     bool valid = total >= alert_min
-    bool go = valid and (z.inside or (z.gap_out and z.touches == 0))
-    string st = not valid ? "NO (score under " + str.tostring(alert_min) + ")" : z.inside ? "GO (retest now)" : (z.gap_out and z.touches == 0) ? "GO (gap away, no retest needed)" : "WAIT FOR RETEST"
+    bool timing = z.inside or (z.gap_out and z.touches == 0)
+    bool ema_ok = not ema_required or ema_n == 1
+    bool go = valid and timing and ema_ok
+    string why = z.inside ? "retest now" : "gap away, no retest needed"
+    string st = not valid ? "NO (score under " + str.tostring(alert_min) + ")" : not timing ? "WAIT FOR RETEST" : not ema_ok ? "WAIT FOR EMA (" + why + ", EMA not with the zone)" : "GO (" + why + ")"
     [go, st]
 
 score_line(int total, int s_range, int s_time, int s_trend, int s_move, int s_os, int s_pur, int s_rrr, float rrr, float ratio, float pos, string opp_nm, float r_top, float r_btm, string r_top_nm, string r_btm_nm, bool split) =>
@@ -1064,8 +1070,8 @@ if barstate.islast
             if na(opp)
                 opp_nm := ""
         [tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, spl] = score_zone(tgt_sup, true, r_top, r_btm, opp, opp_nm)
-        [s_go, s_ent] = entry_state(tgt_sup, tot)
         [s_en, s_et] = ema_conf(tgt_sup, true)
+        [s_go, s_ent] = entry_state(tgt_sup, tot, s_en)
         mark_target(tgt_sup_slot, true, tgt_sup, tgt_sup_tag, (show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, r_top, r_btm, r_top_nm, r_btm_nm, spl) + "\n" : "") + s_et, s_ent, s_go)
         s_json := setup_json(tgt_sup, true, tgt_sup_slot, tgt_sup_tag, tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, s_go, s_ent, s_en)
     if not na(tgt_dem)
@@ -1082,8 +1088,8 @@ if barstate.islast
             if na(opp)
                 opp_nm := ""
         [tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, spl] = score_zone(tgt_dem, false, r_top, r_btm, opp, opp_nm)
-        [d_go, d_ent] = entry_state(tgt_dem, tot)
         [d_en, d_et] = ema_conf(tgt_dem, false)
+        [d_go, d_ent] = entry_state(tgt_dem, tot, d_en)
         mark_target(tgt_dem_slot, false, tgt_dem, tgt_dem_tag, (show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, r_top, r_btm, r_top_nm, r_btm_nm, spl) + "\n" : "") + d_et, d_ent, d_go)
         d_json := setup_json(tgt_dem, false, tgt_dem_slot, tgt_dem_tag, tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, d_go, d_ent, d_en)
     if not na(tgt_sup) and not na(tgt_dem)

@@ -389,13 +389,14 @@ method trim(array<Zone> zones, int limit) =>
         Zone z = zones.pop()
         z.b.delete()
 
-// true when the new price range touches an existing zone of the same timeframe and side
+// true when the new price range touches an existing untested zone of the same timeframe and side.
+// A zone price has already come back to test does not block a new base inside it: both are kept
 method overlaps(array<Zone> zones, float top, float btm) =>
     bool hit = false
     if zones.size() > 0
         for i = 0 to zones.size() - 1
-            box b = zones.get(i).b
-            if top >= b.get_bottom() and btm <= b.get_top()
+            Zone oz = zones.get(i)
+            if oz.touches == 0 and top >= oz.b.get_bottom() and btm <= oz.b.get_top()
                 hit := true
                 break
     hit
@@ -427,8 +428,9 @@ create_zone(array<Zone> zones, bool is_supply, float z_top, float z_btm, int lef
     if (top - btm) > max_height_mult * yard_tf
         ok := false
     // A zone read from the timeframe's own base replaces an overlapping zone only when that zone is a drill-down
-    // guess or a later base. An older zone that is still valid (never closed through) is kept, retested or not,
-    // and the newcomer is skipped: a base formed inside an existing zone is part of that zone, not a new one
+    // guess or a later base. An older zone that is still valid (never closed through) is always kept. If price has
+    // retested it, a new base forming inside it is drawn as well (a new zone closer to price, worth noting). If it is
+    // untested, the newcomer is skipped: a base formed during the first move out of a zone is a continuation
     if ok and not from_lower and zones.size() > 0
         for i = zones.size() - 1 to 0
             Zone oz = zones.get(i)

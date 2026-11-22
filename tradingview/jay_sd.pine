@@ -9,13 +9,15 @@ indicator("Jay S&D", overlay=true, max_bars_back=500, max_boxes_count=500, max_l
 // slot 2 = High (range and backing). Matches the presets on the Zone Scorecard site.
 //-----------------------------------------------------------------------------
 string style_group = 'Trading Style'
-string style = input.string('Position trader', 'Trading Style', options=['Position trader', 'Swing trader', 'Day trader', 'Scalper', 'Custom'], group=style_group, tooltip='Position: Daily / Weekly / Monthly. Swing: 4H / Daily / Weekly. Day trader: 15m / 1H / 4H. Scalper: 5m / 15m / 1H. Low is where the entry zones (targets) come from, Mid is the trend, High is the range and the backing. Custom uses the three inputs below.')
+string style = input.string('Position trader', 'Trading Style', options=['Position trader', 'Swing trader', 'Day trader', 'Scalper', 'Custom'], group=style_group, tooltip='Position: Daily / Weekly / Monthly. Swing: 4H / Daily / Weekly. Day trader: 15m / 1H / 4H. Scalper: 5m / 15m / 1H. Low is where the entry zones (targets) come from, Mid is the trend, High is the range and the backing. Custom uses the three inputs below. Changing any of the three inputs below away from Daily / Weekly / Monthly also switches to them, whatever style is picked.')
 string tf_low_in = input.timeframe('D', 'Custom Low Timeframe', group=style_group)
 string tf_mid_in = input.timeframe('W', 'Custom Mid Timeframe', group=style_group)
 string tf_high_in = input.timeframe('M', 'Custom High Timeframe', group=style_group)
-string TF0 = style == 'Position trader' ? 'D' : style == 'Swing trader' ? '240' : style == 'Day trader' ? '15' : style == 'Scalper' ? '5' : tf_low_in
-string TF1 = style == 'Position trader' ? 'W' : style == 'Swing trader' ? 'D' : style == 'Day trader' ? '60' : style == 'Scalper' ? '15' : tf_mid_in
-string TF2 = style == 'Position trader' ? 'M' : style == 'Swing trader' ? 'W' : style == 'Day trader' ? '240' : style == 'Scalper' ? '60' : tf_high_in
+// editing the custom timeframes away from their defaults means the trader wants them, even with a preset style still picked
+bool use_custom = style == 'Custom' or timeframe.in_seconds(tf_low_in) != timeframe.in_seconds('D') or timeframe.in_seconds(tf_mid_in) != timeframe.in_seconds('W') or timeframe.in_seconds(tf_high_in) != timeframe.in_seconds('M')
+string TF0 = use_custom ? tf_low_in : style == 'Position trader' ? 'D' : style == 'Swing trader' ? '240' : style == 'Day trader' ? '15' : '5'
+string TF1 = use_custom ? tf_mid_in : style == 'Position trader' ? 'W' : style == 'Swing trader' ? 'D' : style == 'Day trader' ? '60' : '15'
+string TF2 = use_custom ? tf_high_in : style == 'Position trader' ? 'M' : style == 'Swing trader' ? 'W' : style == 'Day trader' ? '240' : '60'
 
 // Readable names: DAILY, WEEKLY, MONTHLY, 4H, 15M ...
 tf_name(string tf) =>
@@ -76,7 +78,7 @@ color highlight_color = input.color(color.white, 'Nearest Zone Outline', group=v
 int target_tr = input.int(40, 'Target Zone Fill Transparency', minval=0, maxval=100, group=visual_group, tooltip='The two target zones (white outline) use this fill transparency instead of their timeframe value, so they stand out boldly.')
 color label_color = input.color(color.white, 'Text Color', group=visual_group)
 bool show_zigzag = input.bool(false, 'Show Zig Zag (chart timeframe)', group=visual_group)
-bool show_trend = input.bool(true, 'Show Trend Readout', group=visual_group, tooltip='A box in the top right corner with the trend state of the Trend Timeframe and of the chart timeframe, read from the zig zag swings with the 3 segment rule: higher highs and higher lows is UP, lower highs and lower lows is DOWN, anything else is RANGE. The control point is the last higher low (up) or lower high (down); a close through it ends the trend.')
+bool show_trend = input.bool(true, 'Show Trend Readout', group=visual_group, tooltip='A box in the top right corner with the trend state of the Trend Timeframe (the Mid timeframe) and of the Low timeframe, read from the zig zag swings with the 3 segment rule: higher highs and higher lows is UP, lower highs and lower lows is DOWN, anything else is RANGE. The control point is the last higher low (up) or lower high (down); a close through it ends the trend.')
 bool trend_auto = input.bool(true, 'Trend Readout Uses The Mid Timeframe', group=visual_group, tooltip='On: the readout scores the trend of the style\'s Mid timeframe. Off: it uses the Trend Timeframe below.')
 string trend_tf_in = input.timeframe('W', 'Trend Timeframe (when not automatic)', group=visual_group)
 string trend_tf = trend_auto ? TF1 : trend_tf_in
@@ -826,15 +828,14 @@ trend_line(string nm, int st, float cp, float sh1, float sh2, float sl1, float s
 // swing confirmed by the current week. Without it, a Daily chart sees last week's closed state, so a fresh higher low
 // (AMD 402.10) is missing and the control point lags. Only the last bar's value is used for scoring
 [t_st, t_cp, t_sh1, t_sh2, t_sl1, t_sl2] = request.security(syminfo.tickerid, trend_tf, trend_pack(), lookahead=barmerge.lookahead_on)
-[c_st, c_cp, c_sh1, c_sh2, c_sl1, c_sl2] = trend_pack()
 // the Low timeframe trend (Daily for the Position style), shown on the label when it pulls against the Mid trend
 [l_st, l_cp, l_sh1, l_sh2, l_sl1, l_sl2] = request.security(syminfo.tickerid, TF0, trend_pack(), lookahead=barmerge.lookahead_on)
 
 var table trend_box = table.new(position.top_right, 1, 2, bgcolor=color.new(color.black, 25), border_width=1, border_color=color.new(color.white, 60))
 if barstate.islast and show_trend
     trend_box.cell(0, 0, trend_line(tf_name(trend_tf), t_st, t_cp, t_sh1, t_sh2, t_sl1, t_sl2), text_color=color.white, text_size=size.small, text_halign=text.align_left)
-    if timeframe.in_seconds(trend_tf) != chart_sec
-        trend_box.cell(0, 1, trend_line(tf_name(timeframe.period), c_st, c_cp, c_sh1, c_sh2, c_sl1, c_sl2), text_color=color.new(color.white, 30), text_size=size.small, text_halign=text.align_left)
+    if timeframe.in_seconds(trend_tf) != timeframe.in_seconds(TF0)
+        trend_box.cell(0, 1, trend_line(tf_name(TF0), l_st, l_cp, l_sh1, l_sh2, l_sl1, l_sl2), text_color=color.new(color.white, 30), text_size=size.small, text_halign=text.align_left)
     else
         trend_box.cell(0, 1, "", text_size=size.small)
 

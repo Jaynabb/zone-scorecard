@@ -76,6 +76,7 @@ string ema_rule = input.string('Close beyond fast EMA', 'EMA Flip Rule', options
 bool ema_fast_rule = ema_rule == 'Close beyond fast EMA'
 bool ema_required = input.bool(true, 'Require EMA Agreement For GO', group=ema_group, tooltip='On: a target zone is only a GO when the standing EMA signal points its way (buy for demand, sell for supply). Otherwise the label says WAIT FOR EMA.')
 bool show_ema_sig = input.bool(true, 'Mark EMA Buy / Sell Candles', group=ema_group, tooltip='A small triangle under the candle that flips the EMA signal to BUY and over the candle that flips it to SELL, by the EMA Flip Rule.')
+bool show_exit = input.bool(true, '9 EMA Exit On Target Zones', group=ema_group, tooltip="Trade management after the first retest of a Low timeframe target zone (entry at the near edge, stop at the far edge): at +1R move the stop to breakeven, then exit on the first Low timeframe candle that closes back across the fast EMA. Backtested 2026-11-23 on 5m: +0.14R per trade against -0.05R for a fixed 2R target, and better than fixed 2R in 13 of 15 symbol and timeframe tests. Shown as a TRADE line on the target label with BE and EXIT markers on the chart.")
 color ema_fast_col = input.color(#F5C542, 'Fast / Mid / Slow Colors', group=ema_group, inline='emac')
 color ema_slow_col = input.color(#4FC3F7, '', group=ema_group, inline='emac')
 color ema_long_col = input.color(#B39DDB, '', group=ema_group, inline='emac')
@@ -124,6 +125,7 @@ type Zone
     float ext = na        // furthest price the move out reached before the first retest
     bool gap = false      // the base walk stopped at a price gap, so the zone covers only the candles on the impulse side of it
     bool gap_out = false  // the impulse opened away from the base with a gap: the one case where the trade is a go before any retest
+    int e_t = na          // chart bar time of the first retest: the entry the 9 EMA exit manages
     float chk = na        // drill-down only: the furthest close of this timeframe seen between the base and the turn (for checking the rule)
 
 // slot 0 = Daily, 1 = Weekly, 2 = Monthly
@@ -494,6 +496,8 @@ monitor(array<Zone> zones, bool is_supply, int slot, float c, float h, float l) 
                 z.ext := is_supply ? (na(z.ext) ? l : math.min(z.ext, l)) : (na(z.ext) ? h : math.max(z.ext, h))
             if touching and not z.inside
                 z.touches += 1
+                if z.touches == 1
+                    z.e_t := time
             if touching
                 float hgt = b.get_top() - b.get_bottom()
                 if hgt > 0
@@ -1010,17 +1014,20 @@ ema_pack(int off) =>
     if barstate.isconfirmed and dn and not dn[1] and sig != -1
         sig := -1
         since := 0
-    [ef[off], es[off], el[off], sig[off], since[off]]
+    int xside = close > ef ? 1 : close < ef ? -1 : 0   // which side of the fast EMA this candle closed on (the 9 EMA exit)
+    [ef[off], es[off], el[off], sig[off], since[off], xside[off], time_close[off]]
 
 // a Low timeframe above the chart reads its last closed candle (no repainting); at or below the chart it reads live
 bool ema_hi_tf = timeframe.in_seconds(TF0) > chart_sec
-[ema_f1, ema_s1, ema_l1, ema_sig1, ema_since1] = request.security(syminfo.tickerid, TF0, ema_pack(1), lookahead=barmerge.lookahead_on)
-[ema_f0, ema_s0, ema_l0, ema_sig0, ema_since0] = request.security(syminfo.tickerid, TF0, ema_pack(0), lookahead=barmerge.lookahead_off)
+[ema_f1, ema_s1, ema_l1, ema_sig1, ema_since1, ema_x1, ema_xt1] = request.security(syminfo.tickerid, TF0, ema_pack(1), lookahead=barmerge.lookahead_on)
+[ema_f0, ema_s0, ema_l0, ema_sig0, ema_since0, ema_x0, ema_xt0] = request.security(syminfo.tickerid, TF0, ema_pack(0), lookahead=barmerge.lookahead_off)
 float ema_f = ema_hi_tf ? ema_f1 : ema_f0
 float ema_s = ema_hi_tf ? ema_s1 : ema_s0
 float ema_l = ema_hi_tf ? ema_l1 : ema_l0
 int ema_sig = nz(ema_hi_tf ? ema_sig1 : ema_sig0)
 int ema_since = nz(ema_hi_tf ? ema_since1 : ema_since0)
+int ema_x = nz(ema_hi_tf ? ema_x1 : ema_x0)
+int ema_xt = ema_hi_tf ? ema_xt1 : ema_xt0
 bool ema_buy = ema_sig == 1 and nz(ema_sig[1]) != 1
 bool ema_sell = ema_sig == -1 and nz(ema_sig[1]) != -1
 
@@ -1042,6 +1049,72 @@ ema_conf(Zone z, bool is_supply) =>
     int n = ema_sig == 0 ? 0 : ema_sig == (is_supply ? -1 : 1) ? 1 : -1
     string txt = "EMA " + (n == 1 ? "CONFLUENCE" : n == -1 ? "AGAINST" : "NONE") + " | " + ema_sig_s()
     [n, txt]
+
+// 9 EMA exit (Best Loser Wins: let the winner run). Replays the chart candles since the zone's first retest:
+// entry at the near edge, stop at the far edge. On the entry candle only its close counts in our favour, because its
+// extreme most likely printed before price reached the zone. Once a candle reaches +1R the stop moves to breakeven
+// from the next candle on; after that the trade ends on the first Low timeframe candle that closes back across the
+// fast EMA and closed after the +1R candle. Only trades the standing EMA signal agreed with when Require EMA
+// Agreement is on. Returns [state, label line, bars back to the entry, bars back to the +1R candle, bars back to the
+// end, R at the end]. state: 0 no trade, 1 open, 2 stop at breakeven, 3 9 EMA exit, 4 stopped, 5 breakeven stop.
+trade_walk(Zone z, bool is_supply) =>
+    int state = 0
+    string txt = ""
+    int n = -1
+    int k1 = -1
+    int ke = -1
+    float r_end = na
+    float top = z.b.get_top()
+    float btm = z.b.get_bottom()
+    float near = is_supply ? btm : top
+    float far = is_supply ? top : btm
+    float risk = top - btm
+    int d = is_supply ? -1 : 1
+    if show_exit and not na(z.e_t) and risk > 0
+        for k = 0 to 498
+            if time[k] < z.e_t
+                break
+            n := k
+        if n >= 0 and time[n + 1] < z.e_t and (not ema_required or ema_sig[n] == d)
+            state := 1
+            int t1r = na
+            for k = n to 0
+                float fav = n == k ? math.max((close[k] - near) * d, 0.0) / risk : (d == 1 ? high[k] - near : near - low[k]) / risk
+                float adv = (d == 1 ? low[k] - near : near - high[k]) / risk
+                if state == 1 and adv <= -1
+                    state := 4
+                    ke := k
+                    r_end := -1.0
+                    break
+                if state == 2 and adv <= 0
+                    state := 5
+                    ke := k
+                    r_end := 0.0
+                    break
+                if state == 2 and (k > 0 or barstate.isconfirmed) and ema_x[k] == -d and ema_xt[k] > t1r
+                    state := 3
+                    ke := k
+                    r_end := (close[k] - near) * d / risk
+                    break
+                if state == 1 and fav >= 1
+                    state := 2
+                    k1 := k
+                    t1r := time_close[k]
+            string ema_nm = str.tostring(ema_fast_len) + " EMA"
+            string cross = tf_name(TF0) + " close " + (is_supply ? "above" : "below") + " the " + ema_nm
+            txt := state == 1 ? "TRADE: in at " + str.tostring(near, format.mintick) + ", stop " + str.tostring(far, format.mintick) + " | at +1R (" + str.tostring(near + d * risk, format.mintick) + ") stop to breakeven, then exit on a " + cross :
+                 state == 2 ? "TRADE: stop at breakeven " + str.tostring(near, format.mintick) + " | exit on the first " + cross :
+                 state == 3 ? "TRADE DONE: " + ema_nm + " exit at " + str.tostring(close[ke], format.mintick) + " (" + (r_end >= 0 ? "+" : "") + str.tostring(r_end, "#.#") + "R)" :
+                 state == 4 ? "TRADE DONE: stopped out (-1R)" : "TRADE DONE: breakeven stop (0R)"
+    [state, txt, n, k1, ke, r_end]
+
+// BE and EXIT markers on the chart, cleared with the target labels
+trade_marks(bool is_supply, int state, int k1, int ke, float r_end) =>
+    if state >= 2 and k1 >= 0
+        tgt_labels.push(label.new(bar_index - k1, is_supply ? low[k1] : high[k1], "BE", style=is_supply ? label.style_label_up : label.style_label_down, color=color.new(color.white, 100), textcolor=color.new(color.white, 0), size=size.small))
+    if state >= 3 and ke >= 0
+        string t = state == 3 ? "EXIT " + (r_end >= 0 ? "+" : "") + str.tostring(r_end, "#.#") + "R" : state == 4 ? "STOP -1R" : "BE 0R"
+        tgt_labels.push(label.new(bar_index - ke, is_supply ? high[ke] : low[ke], t, style=is_supply ? label.style_label_down : label.style_label_up, color=color.new(color.white, 100), textcolor=state == 3 and r_end > 0 ? color.new(#2ECC71, 0) : color.new(#FF6B6B, 0), size=size.small))
 
 var table trend_box = table.new(position.top_right, 1, 5, bgcolor=color.new(color.black, 25), border_width=1, border_color=color.new(color.white, 60))
 if barstate.islast and show_trend
@@ -1134,6 +1207,10 @@ setup_json(Zone z, bool is_supply, int slot, string tag, int total, int s_range,
 // approach: how far price has travelled between the two target zones toward the one ahead
 var float prog_prev = na
 bool approach_now = false
+var int s_tr_prev = 0
+var int d_tr_prev = 0
+bool be_now = false
+bool exit_now = false
 if barstate.islast
     Zone tgt_sup = na
     Zone tgt_dem = na
@@ -1173,7 +1250,12 @@ if barstate.islast
         [tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, spl] = score_zone(tgt_sup, true, r_top, r_btm, opp, opp_nm)
         [s_en, s_et] = ema_conf(tgt_sup, true)
         [s_go, s_ent] = entry_state(tgt_sup, tot, s_en)
-        mark_target(tgt_sup_slot, true, tgt_sup, tgt_sup_tag, (show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, r_top, r_btm, r_top_nm, r_btm_nm, spl) + "\n" : "") + s_et, s_ent, s_go)
+        [s_tr, s_trt, s_n, s_k1, s_ke, s_re] = trade_walk(tgt_sup, true)
+        trade_marks(true, s_tr, s_k1, s_ke, s_re)
+        be_now := be_now or (s_tr == 2 and s_tr_prev == 1)
+        exit_now := exit_now or (s_tr >= 3 and s_tr_prev >= 1 and s_tr_prev <= 2)
+        s_tr_prev := s_tr
+        mark_target(tgt_sup_slot, true, tgt_sup, tgt_sup_tag, (show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, r_top, r_btm, r_top_nm, r_btm_nm, spl) + "\n" : "") + s_et + (s_trt != "" ? "\n" + s_trt : ""), s_ent, s_go)
         s_json := setup_json(tgt_sup, true, tgt_sup_slot, tgt_sup_tag, tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, s_go, s_ent, s_en)
     if not na(tgt_dem)
         box opp = na
@@ -1191,7 +1273,12 @@ if barstate.islast
         [tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, spl] = score_zone(tgt_dem, false, r_top, r_btm, opp, opp_nm)
         [d_en, d_et] = ema_conf(tgt_dem, false)
         [d_go, d_ent] = entry_state(tgt_dem, tot, d_en)
-        mark_target(tgt_dem_slot, false, tgt_dem, tgt_dem_tag, (show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, r_top, r_btm, r_top_nm, r_btm_nm, spl) + "\n" : "") + d_et, d_ent, d_go)
+        [d_tr, d_trt, d_n, d_k1, d_ke, d_re] = trade_walk(tgt_dem, false)
+        trade_marks(false, d_tr, d_k1, d_ke, d_re)
+        be_now := be_now or (d_tr == 2 and d_tr_prev == 1)
+        exit_now := exit_now or (d_tr >= 3 and d_tr_prev >= 1 and d_tr_prev <= 2)
+        d_tr_prev := d_tr
+        mark_target(tgt_dem_slot, false, tgt_dem, tgt_dem_tag, (show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, r_top, r_btm, r_top_nm, r_btm_nm, spl) + "\n" : "") + d_et + (d_trt != "" ? "\n" + d_trt : ""), d_ent, d_go)
         d_json := setup_json(tgt_dem, false, tgt_dem_slot, tgt_dem_tag, tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, d_go, d_ent, d_en)
     if not na(tgt_sup) and not na(tgt_dem)
         float s_edge = tgt_sup.b.get_bottom()
@@ -1208,6 +1295,8 @@ if barstate.islast
         string msg = '{"symbol":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","chart_tf":"' + timeframe.period + '","style":"' + (use_custom ? 'Custom' : style) + '","low_tf":"' + tf_name(TF0) + '","mid_tf":"' + tf_name(TF1) + '","high_tf":"' + tf_name(TF2) + '","price":' + num(close) + ',"bar_time":' + str.tostring(time) + ',"trend":"' + trend_s + '","low_trend":"' + (l_st == 1 ? "UP" : l_st == -1 ? "DOWN" : "RANGE") + '","control_point":' + num(t_cp) + ',"range_top":' + num(r_top) + ',"range_btm":' + num(r_btm) + ',"alert_min":' + str.tostring(alert_min) + ',"setups":[' + s_json + (s_json != "" and d_json != "" ? "," : "") + d_json + ']}'
         alert(msg, alert.freq_once_per_bar_close)
 
+alertcondition(be_now, "Move stop to breakeven", "{{ticker}}: the target zone trade reached +1R, move the stop to breakeven")
+alertcondition(exit_now, "9 EMA exit", "{{ticker}}: the target zone trade is done (9 EMA exit or stop)")
 alertcondition(approach_now, "Price near a target zone", "{{ticker}}: price has covered most of the way to the next target zone")
 
 //-----------------------------------------------------------------------------

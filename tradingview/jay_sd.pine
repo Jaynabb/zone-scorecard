@@ -131,7 +131,6 @@ var array<Zone> sup_w = array.new<Zone>()
 var array<Zone> dem_w = array.new<Zone>()
 var array<Zone> sup_m = array.new<Zone>()
 var array<Zone> dem_m = array.new<Zone>()
-var array<box> broken_zones = array.new<box>()
 var array<label> tgt_labels = array.new<label>()   // right-margin labels for the target zones, rebuilt on every refresh
 // the target zones picked on the last bar (arrays, because functions may not assign globals), labeled and scored after the trend readout is known
 var array<Zone> tgt_zones = array.new<Zone>()
@@ -477,19 +476,6 @@ monitor(array<Zone> zones, bool is_supply, int slot, float c, float h, float l) 
             float limit_level = is_supply ? b.get_top() : b.get_bottom()
             bool broken = is_supply ? c >= limit_level : c <= limit_level
             if broken
-                box bos = b.copy()
-                float mid = (b.get_top() + b.get_bottom()) / 2
-                bos.set_top(mid)
-                bos.set_bottom(mid)
-                bos.set_bgcolor(color.new(color.white, 100))
-                bos.set_border_color(color.new(color.white, 80))
-                bos.set_border_width(1)
-                bos.set_text("")
-                bos.set_extend(extend.none)
-                bos.set_right(time)
-                broken_zones.unshift(bos)
-                if broken_zones.size() > 10
-                    broken_zones.pop().delete()
                 brk_t.unshift(time)
                 brk_k.unshift(slot * 2 + (is_supply ? 0 : 1))
                 brk_lt.unshift(z.lt)

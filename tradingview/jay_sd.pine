@@ -99,6 +99,7 @@ int target_tr = input.int(40, 'Target Zone Fill Transparency', minval=0, maxval=
 color label_color = input.color(color.white, 'Text Color', group=visual_group)
 bool show_zigzag = input.bool(false, 'Show Zig Zag (chart timeframe)', group=visual_group)
 bool show_trend = input.bool(true, 'Show Trend Readout', group=visual_group, tooltip='A box in the top right corner with the trend state of the High timeframe (top, for context), the Trend Timeframe (the Mid timeframe, scored) and the Low timeframe, read from the zig zag swings with the 3 segment rule: higher highs and higher lows is UP, lower highs and lower lows is DOWN, anything else is RANGE. The control point is the last higher low (up) or lower high (down); a close through it ends the trend.')
+bool show_fib = input.bool(true, 'Show High Timeframe Fib Range', group=visual_group, tooltip='Draws the range the Range score uses: a fib from the last swing high to the last swing low of the High timeframe (the highest of the three), stretched when price trades beyond either end. Lines at 0, 25, 50, 75 and 100%. Demand in the bottom 25% scores 2 and below 75% scores 1; supply in the top 25% scores 2 and above 25% scores 1.')
 bool trend_auto = input.bool(true, 'Trend Readout Uses The Mid Timeframe', group=visual_group, tooltip='On: the readout scores the trend of the style\'s Mid timeframe. Off: it uses the Trend Timeframe below.')
 string trend_tf_in = input.timeframe('W', 'Trend Timeframe (when not automatic)', group=visual_group)
 string trend_tf = trend_auto ? TF1 : trend_tf_in
@@ -925,6 +926,47 @@ trend_pack() =>
     bool cons = state == -1 ? (not na(sl2) and sl1 >= sl2 and not new_lo) : state == 1 ? (not na(sh2) and sh1 <= sh2 and not new_hi) : false
     [state, cp, sh1, sh2, sl1, sl2, cons]
 
+// The High timeframe fib range: the last swing high and the last swing low of the same alternating swings, each
+// pushed out when price trades beyond it. Returns [high, low, high time, low time]
+fib_pack() =>
+    var bool up = false
+    var float last = na
+    var float hi = na
+    var float lo = na
+    var int hi_t = na
+    var int lo_t = na
+    float ph = ta.pivothigh(high, zz_len, zz_right)
+    float pl = ta.pivotlow(low, zz_len, zz_right)
+    if na(last)
+        last := close
+    if up and not na(ph)
+        if ph > last
+            last := ph
+            hi := ph
+            hi_t := time[zz_right]
+    else if up and not na(pl)
+        up := false
+        last := pl
+        lo := pl
+        lo_t := time[zz_right]
+    else if not up and not na(pl)
+        if pl < last
+            last := pl
+            lo := pl
+            lo_t := time[zz_right]
+    else if not up and not na(ph)
+        up := true
+        last := ph
+        hi := ph
+        hi_t := time[zz_right]
+    if not na(hi) and high > hi
+        hi := high
+        hi_t := time
+    if not na(lo) and low < lo
+        lo := low
+        lo_t := time
+    [hi, lo, hi_t, lo_t]
+
 trend_line(string nm, int st, float cp, float sh1, float sh2, float sl1, float sl2, bool cons) =>
     string st_s = cons ? "CONSOLIDATION (" + (st == 1 ? "up" : "down") + "trend stalled, no new " + (st == 1 ? "high" : "low") + ")" : st == 1 ? "UP" : st == -1 ? "DOWN" : "RANGE (no break of structure yet)"
     string cp_s = st == 1 ? " | control point " + str.tostring(cp, format.mintick) + " (a close below ends it)" : st == -1 ? " | control point " + str.tostring(cp, format.mintick) + " (a close above ends it)" : ""
@@ -939,6 +981,8 @@ trend_line(string nm, int st, float cp, float sh1, float sh2, float sl1, float s
 [l_st, l_cp, l_sh1, l_sh2, l_sl1, l_sl2, l_cons] = request.security(syminfo.tickerid, TF0, trend_pack(), lookahead=timeframe.in_seconds(TF0) > chart_sec ? barmerge.lookahead_on : barmerge.lookahead_off)
 // the High timeframe trend, shown above the others for the bigger picture (not scored)
 [ht_st, ht_cp, ht_sh1, ht_sh2, ht_sl1, ht_sl2, ht_cons] = request.security(syminfo.tickerid, TF2, trend_pack(), lookahead=timeframe.in_seconds(TF2) > chart_sec ? barmerge.lookahead_on : barmerge.lookahead_off)
+// the High timeframe fib range, scored by the Range check
+[fib_hi, fib_lo, fib_hi_t, fib_lo_t] = request.security(syminfo.tickerid, TF2, fib_pack(), lookahead=timeframe.in_seconds(TF2) > chart_sec ? barmerge.lookahead_on : barmerge.lookahead_off)
 
 //-----------------------------------------------------------------------------
 // EMA CONFLUENCE
@@ -1004,23 +1048,10 @@ if barstate.islast and show_trend
 // (100% at the middle of the nearest High timeframe supply, 0% at the middle of the nearest High timeframe demand)
 // and an automatic risk to reward (entry at the zone's near edge, stop at its far edge, target at the other target zone).
 //-----------------------------------------------------------------------------
-// The automatic range: 100% at the middle of the nearest High timeframe supply above price, 0% at the middle of the
-// nearest High timeframe demand below. When a side has no High timeframe zone (a market at its highs or lows), the
-// nearest Mid timeframe zone on that side stands in, even on a chart where Mid zones are not drawn.
+// The range: a fib on the High timeframe (the highest of the three), 100% at its last swing high and 0% at its last
+// swing low, each pushed out when price trades beyond it (see fib_pack).
 range_levels() =>
-    box s = nearest_zone_box(sup_m, true)
-    box d = nearest_zone_box(dem_m, false)
-    string s_nm = tf_name(TF2)
-    string d_nm = tf_name(TF2)
-    if na(s)
-        s := nearest_zone_box(sup_w, true)
-        s_nm := tf_name(TF1)
-    if na(d)
-        d := nearest_zone_box(dem_w, false)
-        d_nm := tf_name(TF1)
-    float top = na(s) ? na : (s.get_top() + s.get_bottom()) / 2
-    float btm = na(d) ? na : (d.get_top() + d.get_bottom()) / 2
-    [top, btm, s_nm, d_nm]
+    [fib_hi, fib_lo, tf_name(TF2) + " swing high", tf_name(TF2) + " swing low"]
 
 // Returns [total, range, time, trend, move, os, purity, rrr, rrr_ratio, move_ratio, range_pos]
 score_zone(Zone z, bool is_supply, float r_top, float r_btm, box opp, string opp_nm) =>
@@ -1073,7 +1104,7 @@ entry_state(Zone z, int total, int ema_n) =>
     [go, st]
 
 score_line(int total, int s_range, int s_time, int s_trend, int s_move, int s_os, int s_pur, int s_rrr, float rrr, float ratio, float pos, string opp_nm, float r_top, float r_btm, string r_top_nm, string r_btm_nm, bool split) =>
-    "SCORE " + str.tostring(total) + "/20 | range " + (na(pos) ? "? (no HTF zones)" : str.tostring(s_range) + (show_zone_info ? " (" + str.tostring(math.round(pos * 100)) + "% of " + str.tostring(r_btm, format.mintick) + " " + r_btm_nm + " to " + str.tostring(r_top, format.mintick) + " " + r_top_nm + ")" : "")) + " | time " + str.tostring(s_time) + " | trend " + str.tostring(s_trend) + (split ? " (" + tf_name(TF0) + " pulling against " + tf_name(TF1) + ")" : "") + " | move " + str.tostring(s_move) + (na(ratio) ? "" : " (" + str.tostring(ratio, "#.#") + "x)") + " | OS " + str.tostring(s_os) + " | purity " + str.tostring(s_pur) + " | rrr " + str.tostring(s_rrr) + (na(rrr) ? " (no opposing zone)" : " (" + str.tostring(rrr, "#.#") + ":1" + (opp_nm == "" ? "" : " to " + opp_nm) + ")")
+    "SCORE " + str.tostring(total) + "/20 | range " + (na(pos) ? "? (no " + tf_name(TF2) + " swings yet)" : str.tostring(s_range) + (show_zone_info ? " (" + str.tostring(math.round(pos * 100)) + "% of " + str.tostring(r_btm, format.mintick) + " " + r_btm_nm + " to " + str.tostring(r_top, format.mintick) + " " + r_top_nm + ")" : "")) + " | time " + str.tostring(s_time) + " | trend " + str.tostring(s_trend) + (split ? " (" + tf_name(TF0) + " pulling against " + tf_name(TF1) + ")" : "") + " | move " + str.tostring(s_move) + (na(ratio) ? "" : " (" + str.tostring(ratio, "#.#") + "x)") + " | OS " + str.tostring(s_os) + " | purity " + str.tostring(s_pur) + " | rrr " + str.tostring(s_rrr) + (na(rrr) ? " (no opposing zone)" : " (" + str.tostring(rrr, "#.#") + ":1" + (opp_nm == "" ? "" : " to " + opp_nm) + ")")
 
 num(float x) =>
     na(x) ? "null" : str.tostring(x, "#.####")
@@ -1211,3 +1242,22 @@ if show_zigzag
 
     if na(zz_line) and (is_high or is_low)
         zz_line := line.new(bar_index, close, bar_index[zz_right], is_high ? n_ph : n_pl, color=zigzag_color, width=2)
+
+//-----------------------------------------------------------------------------
+// HIGH TIMEFRAME FIB RANGE (drawn on the last bar)
+//-----------------------------------------------------------------------------
+var array<line> fib_lines = array.new<line>()
+var array<label> fib_labels = array.new<label>()
+if barstate.islast
+    while fib_lines.size() > 0
+        fib_lines.pop().delete()
+    while fib_labels.size() > 0
+        fib_labels.pop().delete()
+    if show_fib and not na(fib_hi) and not na(fib_lo) and fib_hi > fib_lo
+        int t0 = math.min(fib_hi_t, fib_lo_t)
+        int t1 = time + 5 * timeframe.in_seconds() * 1000
+        for lv in array.from(0.0, 0.25, 0.5, 0.75, 1.0)
+            float p = fib_lo + lv * (fib_hi - fib_lo)
+            color col = lv == 1.0 ? color.new(#FF6B6B, 20) : lv == 0.0 ? color.new(#2ECC71, 20) : color.new(#F5C542, lv == 0.5 ? 30 : 55)
+            fib_lines.push(line.new(t0, p, t1, p, xloc=xloc.bar_time, color=col, style=lv == 0.5 ? line.style_dashed : line.style_dotted, width=1))
+            fib_labels.push(label.new(t0, p, tf_name(TF2) + " " + str.tostring(lv * 100, "#") + "%", xloc=xloc.bar_time, style=label.style_label_lower_left, color=color.new(color.white, 100), textcolor=col, size=size.tiny))

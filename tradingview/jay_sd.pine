@@ -109,6 +109,8 @@ bool show_labels = input.bool(false, 'Show Swing Labels (chart timeframe)', grou
 color zigzag_color = input.color(color.gray, 'ZigZag Color', group=visual_group)
 bool show_zone_info = input.bool(false, 'Zone Facts On Every Box', group=visual_group, tooltip='Prints price range, base candle count, base date and origin (own base, gap refined, or read from the timeframe below) inside every drawn box. For checking a zone against the rules.')
 bool label_targets_only = input.bool(true, 'Label Only The Target Zones', group=visual_group, tooltip='Only the white outlined zones (the nearest on each side) get a label: timeframe, side, price range and the word TARGET, placed in the margin right of the last candle. Other boxes stay unlabeled. Turn off to also print timeframe and side inside every box.')
+// added last so earlier inputs keep their ids and existing chart settings stay put
+bool mid_entry = input.bool(true, 'Enter On First Mid TF Touch', group=filt_group, tooltip="When price makes its first touch of a Mid timeframe zone and no Low timeframe zone of the same side sits inside it yet, that Mid zone becomes the target and the touch is the entry (stop past its far edge). Waiting for a Low timeframe zone to form from the bounce and get retested mostly missed the move. Backtested 2026-11-23: Daily inside Weekly +0.20R per trade entering on the Weekly touch against -0.06R waiting; 1H in 4H and 5m in 30m pointed the same way. The score and EMA rules still apply.")
 
 //-----------------------------------------------------------------------------
 // TYPES, ARRAYS & GLOBALS
@@ -1121,6 +1123,40 @@ trade_marks(bool is_supply, int state, int k1, int ke, float r_end) =>
         string t = state == 3 ? "EXIT " + (r_end >= 0 ? "+" : "") + str.tostring(r_end, "#.#") + "R" : state == 4 ? "STOP -1R" : "BE 0R"
         tgt_labels.push(label.new(bar_index - ke, is_supply ? high[ke] : low[ke], t, style=is_supply ? label.style_label_down : label.style_label_up, color=color.new(color.white, 100), textcolor=state == 3 and r_end > 0 ? color.new(#2ECC71, 0) : color.new(#FF6B6B, 0), size=size.small))
 
+// Mid timeframe zone on its first touch with no Low timeframe zone of the same side inside it from before the touch
+// (a Low zone born from the bounce does not count). It qualifies while price is in it, and afterwards while the trade
+// taken on that touch is still open, so the 9 EMA exit keeps managing it. The most recent such touch wins.
+mid_touch_zone(array<Zone> mids, array<Zone> lows, bool is_supply) =>
+    Zone best = na
+    if mid_entry and mids.size() > 0
+        for i = 0 to mids.size() - 1
+            Zone z = mids.get(i)
+            if z.touches == 1 and not na(z.e_t)
+                bool inner = false
+                if lows.size() > 0
+                    for j = 0 to lows.size() - 1
+                        Zone lz = lows.get(j)
+                        if lz.lt < z.e_t and lz.b.get_top() >= z.b.get_bottom() and lz.b.get_bottom() <= z.b.get_top()
+                            inner := true
+                            break
+                if not inner
+                    bool live = z.inside
+                    if not live
+                        [st, tx, n0, k1, ke, re] = trade_walk(z, is_supply)
+                        live := st == 1 or st == 2
+                    if live and (na(best) or z.e_t > best.e_t)
+                        best := z
+    best
+
+// makes a Mid timeframe first touch the target of its side, moving the white outline off the Low timeframe target
+take_mid_target(Zone low_tgt, Zone mid_z, bool is_supply) =>
+    if not na(low_tgt)
+        [w, tr, nm] = zone_style(0)
+        low_tgt.b.set_border_color(zone_color(0, is_supply))
+        low_tgt.b.set_border_width(w)
+    mid_z.b.set_border_color(highlight_color)
+    mid_z.b.set_border_width(3)
+
 var table trend_box = table.new(position.top_right, 1, 5, bgcolor=color.new(color.black, 25), border_width=1, border_color=color.new(color.white, 60))
 if barstate.islast and show_trend
     if timeframe.in_seconds(TF2) != timeframe.in_seconds(trend_tf)
@@ -1224,12 +1260,12 @@ score_zone(Zone z, bool is_supply, float r_top, float r_btm, box opp, string opp
 // from the base, which allows an entry before any retest. A go needs the score as well.
 // ema_n: 1 when the standing EMA signal points the zone's way (see ema_conf). With Require EMA Agreement on,
 // a zone whose timing is right but whose EMA signal is not with it waits for the EMA
-entry_state(Zone z, int total, int ema_n) =>
+entry_state(Zone z, int total, int ema_n, int slot) =>
     bool valid = total >= alert_min
     bool timing = z.inside or (z.gap_out and z.touches == 0)
     bool ema_ok = not ema_required or ema_n == 1
     bool go = valid and timing and ema_ok
-    string why = z.inside ? "retest now" : "gap away, no retest needed"
+    string why = slot == 1 and z.inside ? tf_name(TF1) + " first touch, no " + tf_name(TF0) + " zone inside" : z.inside ? "retest now" : "gap away, no retest needed"
     string st = not valid ? "NO (score under " + str.tostring(alert_min) + ")" : not timing ? "WAIT FOR RETEST" : not ema_ok ? "WAIT FOR EMA (" + why + ", EMA not with the zone)" : "GO (" + why + ")"
     [go, st]
 
@@ -1268,6 +1304,20 @@ if barstate.islast
                 tgt_dem := tgt_zones.get(i)
                 tgt_dem_tag := tgt_tags.get(i)
                 tgt_dem_slot := tgt_slots.get(i)
+    // a first touch of a Mid timeframe zone with no Low timeframe zone inside it is the entry (see mid_touch_zone)
+    if show_d and show_w
+        Zone ms = mid_touch_zone(sup_w, sup_d, true)
+        if not na(ms)
+            take_mid_target(tgt_sup, ms, true)
+            tgt_sup := ms
+            tgt_sup_slot := 1
+            tgt_sup_tag := ""
+        Zone md = mid_touch_zone(dem_w, dem_d, false)
+        if not na(md)
+            take_mid_target(tgt_dem, md, false)
+            tgt_dem := md
+            tgt_dem_slot := 1
+            tgt_dem_tag := ""
     [r_top, r_btm, r_top_nm, r_btm_nm, r_top_t, r_btm_t] = range_levels()
     string s_json = ""
     string d_json = ""
@@ -1289,7 +1339,7 @@ if barstate.islast
                 opp_nm := ""
         [tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, spl] = score_zone(tgt_sup, true, r_top, r_btm, opp, opp_nm)
         [s_en, s_et] = ema_conf(tgt_sup, true)
-        [s_go, s_ent] = entry_state(tgt_sup, tot, s_en)
+        [s_go, s_ent] = entry_state(tgt_sup, tot, s_en, tgt_sup_slot)
         [s_tr, s_trt, s_n, s_k1, s_ke, s_re] = trade_walk(tgt_sup, true)
         trade_marks(true, s_tr, s_k1, s_ke, s_re)
         be_now := be_now or (s_tr == 2 and s_tr_prev == 1)
@@ -1312,7 +1362,7 @@ if barstate.islast
                 opp_nm := ""
         [tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, spl] = score_zone(tgt_dem, false, r_top, r_btm, opp, opp_nm)
         [d_en, d_et] = ema_conf(tgt_dem, false)
-        [d_go, d_ent] = entry_state(tgt_dem, tot, d_en)
+        [d_go, d_ent] = entry_state(tgt_dem, tot, d_en, tgt_dem_slot)
         [d_tr, d_trt, d_n, d_k1, d_ke, d_re] = trade_walk(tgt_dem, false)
         trade_marks(false, d_tr, d_k1, d_ke, d_re)
         be_now := be_now or (d_tr == 2 and d_tr_prev == 1)

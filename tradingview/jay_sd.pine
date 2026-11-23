@@ -51,6 +51,7 @@ float dep_mult = input.float(1.0, 'Departure (x zone height)', minval=0.25, step
 int dep_bars = input.int(8, 'Departure Within (candles)', minval=1, maxval=20, group=filt_group, tooltip='A zone appears as soon as the impulse candle alone has departed this far, otherwise once the follow-through has, checked this many candles after the impulse.')
 float max_height_mult = input.float(4.0, 'Max Zone Height (x typical body)', minval=0.5, step=0.5, group=filt_group, tooltip='Zones taller than this many typical bodies of their own timeframe are skipped.')
 int max_touches = input.int(0, 'Remove Zone After N Touches', minval=0, group=filt_group, tooltip='A retest is price coming back into the zone after a candle closed back outside it. 0 = never remove by retests; purity is scored on the sheet instead.')
+bool one_done = input.bool(true, 'One And Done Under 1 Hour', group=filt_group, tooltip='Zones of a timeframe under 1 hour are tradable once: the zone is removed when price comes back for a second touch. Your mentor\'s rule; on 5m backtests the first touch was the best one.')
 bool corr_only = input.bool(false, 'Hide Higher Timeframe Zones Without Correlation', group=filt_group, tooltip='Off: higher timeframe zones are drawn as hollow frames wherever they are, which shows where price is heading. On: they are drawn only where they overlap a chart timeframe zone of the same side. Zones from lower timeframes are never drawn either way.')
 int show_n = input.int(3, 'Show Nearest Zones Per Side', minval=1, maxval=20, group=filt_group, tooltip='Per timeframe: draw only this many supply zones above price and demand zones below price. The rest stay in memory and appear when price moves toward them.')
 
@@ -499,7 +500,8 @@ monitor(array<Zone> zones, bool is_supply, int slot, float c, float h, float l) 
                     float pen = is_supply ? (h - b.get_bottom()) / hgt : (b.get_top() - l) / hgt
                     z.depth := math.max(z.depth, math.min(math.max(pen, 0.0), 1.0))
             z.inside := touching and not closed_out
-            if max_touches > 0 and z.touches > max_touches
+            int tlim = one_done and timeframe.in_seconds(slot == 0 ? TF0 : slot == 1 ? TF1 : TF2) < 3600 ? 1 : max_touches
+            if tlim > 0 and z.touches > tlim
                 b.delete()
                 zones.remove(i)
 

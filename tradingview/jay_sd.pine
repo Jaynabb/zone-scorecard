@@ -67,7 +67,7 @@ bool alerts_on = input.bool(true, 'Send Setup Alerts', group=scan_group, tooltip
 bool show_score = input.bool(true, 'Show Score In Target Label', group=scan_group, tooltip='Adds a SCORE line to each target label with the indicator\'s own point estimate for every check.')
 float approach_pct = input.float(0.8, 'Approach Alert At (share of the way)', minval=0.1, maxval=0.99, step=0.05, group=scan_group, tooltip='Fires the "Price near a target zone" alert condition when price has covered this share of the distance between the two target zones, heading into one of them. Create a separate alert for it with sound on.')
 string ema_group = 'EMA Confluence'
-bool show_ema = input.bool(true, 'Show EMAs', group=ema_group, tooltip='Draws the three EMAs of the chart timeframe. The EMA line on each target label is worked out either way.')
+bool show_ema = input.bool(true, 'Show EMAs', group=ema_group, tooltip='Draws the three EMAs of the Low timeframe (the entry timeframe), which is what the EMA signal uses whatever the chart timeframe is. The EMA line on each target label is worked out either way.')
 int ema_fast_len = input.int(9, 'Fast / Mid / Slow EMA', minval=1, group=ema_group, inline='ema', tooltip='Backtested 2026-11-22 on EURUSD, GBPUSD, gold, BTC and NQ: 9 / 21 / 50 on the Daily chart gave the best results for the full candle rule (about 59% win rate at 1:1 and +0.25R per trade at 1:2, against about breakeven for random entries). The edge was small on 1H and none on 5m.')
 int ema_slow_len = input.int(21, '', minval=1, group=ema_group, inline='ema')
 int ema_long_len = input.int(50, '', minval=1, group=ema_group, inline='ema')
@@ -990,22 +990,37 @@ trend_line(string nm, int st, float cp, float sh1, float sh2, float sl1, float s
 // all three is a sell signal. The last signal stands until the opposite one prints. A target zone gets EMA
 // confluence when the standing signal points its way (buy for demand, sell for supply). Not part of the 20 point score.
 //-----------------------------------------------------------------------------
-float ema_f = ta.ema(close, ema_fast_len)
-float ema_s = ta.ema(close, ema_slow_len)
-float ema_l = ta.ema(close, ema_long_len)
-bool ema_up = ema_fast_rule ? close > ema_f : low > math.max(ema_f, ema_s, ema_l)
-bool ema_dn = ema_fast_rule ? close < ema_f : high < math.min(ema_f, ema_s, ema_l)
-// judged on closed candles only, so a live candle cannot flash a signal and take it back
-bool ema_buy = barstate.isconfirmed and ema_up and not ema_up[1]
-bool ema_sell = barstate.isconfirmed and ema_dn and not ema_dn[1]
-var int ema_sig = 0
-var int ema_sig_bar = na
-if ema_buy and ema_sig != 1
-    ema_sig := 1
-    ema_sig_bar := bar_index
-if ema_sell and ema_sig != -1
-    ema_sig := -1
-    ema_sig_bar := bar_index
+// Worked out on the Low timeframe (the entry timeframe), whatever the chart timeframe is.
+// Returns [fast, mid, slow, signal, Low timeframe candles since the signal], off candles back
+ema_pack(int off) =>
+    float ef = ta.ema(close, ema_fast_len)
+    float es = ta.ema(close, ema_slow_len)
+    float el = ta.ema(close, ema_long_len)
+    bool up = ema_fast_rule ? close > ef : low > math.max(ef, es, el)
+    bool dn = ema_fast_rule ? close < ef : high < math.min(ef, es, el)
+    var int sig = 0
+    var int since = 0
+    since += 1
+    // judged on closed candles only, so a live candle cannot flash a signal and take it back
+    if barstate.isconfirmed and up and not up[1] and sig != 1
+        sig := 1
+        since := 0
+    if barstate.isconfirmed and dn and not dn[1] and sig != -1
+        sig := -1
+        since := 0
+    [ef[off], es[off], el[off], sig[off], since[off]]
+
+// a Low timeframe above the chart reads its last closed candle (no repainting); at or below the chart it reads live
+bool ema_hi_tf = timeframe.in_seconds(TF0) > chart_sec
+[ema_f1, ema_s1, ema_l1, ema_sig1, ema_since1] = request.security(syminfo.tickerid, TF0, ema_pack(1), lookahead=barmerge.lookahead_on)
+[ema_f0, ema_s0, ema_l0, ema_sig0, ema_since0] = request.security(syminfo.tickerid, TF0, ema_pack(0), lookahead=barmerge.lookahead_off)
+float ema_f = ema_hi_tf ? ema_f1 : ema_f0
+float ema_s = ema_hi_tf ? ema_s1 : ema_s0
+float ema_l = ema_hi_tf ? ema_l1 : ema_l0
+int ema_sig = nz(ema_hi_tf ? ema_sig1 : ema_sig0)
+int ema_since = nz(ema_hi_tf ? ema_since1 : ema_since0)
+bool ema_buy = ema_sig == 1 and nz(ema_sig[1]) != 1
+bool ema_sell = ema_sig == -1 and nz(ema_sig[1]) != -1
 
 plot(show_ema ? ema_f : na, 'Fast EMA', color=ema_fast_col, linewidth=1)
 plot(show_ema ? ema_s : na, 'Mid EMA', color=ema_slow_col, linewidth=1)
@@ -1018,7 +1033,7 @@ alertcondition(ema_sell, 'EMA sell candle', '{{ticker}}: EMA signal flipped to S
 ema_sig_s() =>
     string lens = str.tostring(ema_fast_len) + "/" + str.tostring(ema_slow_len) + "/" + str.tostring(ema_long_len)
     string how = ema_fast_rule ? "close " + (ema_sig == 1 ? "above " : "below ") + str.tostring(ema_fast_len) + " EMA" : "full candle " + (ema_sig == 1 ? "above " : "below ") + lens
-    ema_sig == 0 ? "no signal yet" : (ema_sig == 1 ? "BUY" : "SELL") + " (" + how + ", " + str.tostring(bar_index - ema_sig_bar) + " bars ago)"
+    ema_sig == 0 ? "no signal yet" : (ema_sig == 1 ? "BUY" : "SELL") + " (" + how + ", " + str.tostring(ema_since) + " " + tf_name(TF0) + " bars ago)"
 
 // returns 1 when the standing signal points the zone's way, -1 when it points against it, 0 with no signal, and the label line
 ema_conf(Zone z, bool is_supply) =>

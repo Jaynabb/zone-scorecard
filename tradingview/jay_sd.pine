@@ -541,6 +541,22 @@ create_zone(array<Zone> zones, bool is_supply, float z_top, float z_btm, int lef
             if over and (oz.via_lower or oz.lt >= left_time)
                 oz.b.delete()
                 zones.remove(i)
+    // A base that forms inside an older zone of the same timeframe and side while price is retesting it is that zone's
+    // retest reaction, not a new zone: the older zone is kept (stretched to the new wick if it poked out) with its touch
+    // history, so the area does not read as fresh. A zone that holds is still the zone however old it is. A base mostly
+    // outside it is its own zone
+    if ok and zones.size() > 0
+        for i = 0 to zones.size() - 1
+            Zone oz = zones.get(i)
+            float o_top = oz.b.get_top()
+            float o_btm = oz.b.get_bottom()
+            float ov = math.min(top, o_top) - math.max(btm, o_btm)
+            bool retested = oz.touches > 0 and not na(oz.e_t) and oz.e_t <= left_time
+            if retested and ov >= 0.5 * (top - btm)
+                oz.b.set_top(math.max(top, o_top))
+                oz.b.set_bottom(math.min(btm, o_btm))
+                ok := false
+                break
     if ok and not zones.overlaps(top, btm)
         [w, tr, nm] = zone_style(slot)
         color base = zone_color(slot, is_supply)

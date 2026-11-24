@@ -49,7 +49,7 @@ string filt_group = 'Zone Filters'
 bool use_departure = input.bool(true, 'Require Strong Departure', group=filt_group, tooltip='Keep a zone only if price left it by at least the departure multiple of the zone height within the given number of candles. This is the 2x move rule.')
 float dep_mult = input.float(1.0, 'Departure (x zone height)', minval=0.25, step=0.25, group=filt_group, tooltip='Price must travel at least this many zone heights beyond the zone edge for the zone to count. Your 2x scoring rule still applies on the scorecard; this only decides whether a zone is drawn.')
 int dep_bars = input.int(8, 'Departure Within (candles)', minval=1, maxval=20, group=filt_group, tooltip='A zone appears as soon as the impulse candle alone has departed this far, otherwise once the follow-through has, checked this many candles after the impulse.')
-float max_height_mult = input.float(4.0, 'Max Zone Height (x typical body)', minval=0.5, step=0.5, group=filt_group, tooltip='Zones taller than this many typical bodies of their own timeframe are skipped.')
+float max_height_mult = input.float(4.0, 'Max Zone Height (x typical body)', minval=0.5, step=0.5, group=filt_group, tooltip='Zones taller than this many typical bodies of their own timeframe are skipped, unless price moved away from the zone by at least twice its height.')
 int max_touches = input.int(0, 'Remove Zone After N Touches', minval=0, group=filt_group, tooltip='A retest is price coming back into the zone after a candle closed back outside it. 0 = never remove by retests; purity is scored on the sheet instead.')
 bool one_done = input.bool(true, 'One And Done Under 1 Hour', group=filt_group, tooltip='Zones of a timeframe under 1 hour are tradable once: the zone is removed when price comes back for a second touch. Your mentor\'s rule; on 5m backtests the first touch was the best one.')
 bool corr_only = input.bool(false, 'Hide Higher Timeframe Zones Without Correlation', group=filt_group, tooltip='Off: higher timeframe zones are drawn as hollow frames wherever they are, which shows where price is heading. On: they are drawn only where they overlap a chart timeframe zone of the same side. Zones from lower timeframes are never drawn either way.')
@@ -296,20 +296,50 @@ departs(bool is_supply, int k, float top, float btm, float yard) =>
     [ok, out]
 
 // One candidate per side per bar: an impulse that closed last bar and already departed far enough,
-// otherwise an impulse dep_bars ago whose follow-through has now departed far enough.
+// otherwise an impulse up to dep_bars ago whose follow-through departed far enough on the last closed candle.
 candidate(bool is_supply, float yard) =>
     [f1, t1, b1, l1, n1, i1, tn1, a1, c1, x1, g1, o1] = detect(is_supply, 1, yard)
     [dep1, mx1] = departs(is_supply, 1, t1, b1, yard)
     bool ok1 = f1 and (not use_departure or dep1)
     [f2, t2, b2, l2, n2, i2, tn2, a2, c2, x2, g2, o2] = detect(is_supply, dep_bars, yard)
-    [dep2, mx2] = departs(is_supply, dep_bars, t2, b2, yard)
-    bool ok2 = f2 and (not use_departure or dep2)
-    // a zone found late (impulse dep_bars ago) is dead on arrival if any candle since the impulse closed through its far edge
-    if ok2
-        for i = 1 to dep_bars - 1
-            if is_supply ? close[i] > t2 : close[i] < b2
-                ok2 := false
-                break
+    float mx2 = na
+    bool ok2 = false
+    // otherwise the zone appears on the candle its follow-through completes the departure: an impulse k candles back
+    // (k = 2 to dep_bars) that had not departed by the candle before and has now. Waiting the full dep_bars candles
+    // showed a zone late, after its first retests had already printed
+    if use_departure
+        for k = 2 to dep_bars
+            [fk, tk, bk, lk, nk, ik, tnk, ak, ck, xk, gk, ok_] = detect(is_supply, k, yard)
+            if fk
+                [depk, mxk] = departs(is_supply, k, tk, bk, yard)
+                float need = (tk - bk) * dep_mult
+                // reached on the last closed candle only: everything from the impulse to the candle before fell short
+                float prev = na
+                for i = 2 to k
+                    prev := is_supply ? (na(prev) ? low[i] : math.min(prev, low[i])) : (na(prev) ? high[i] : math.max(prev, high[i]))
+                bool newly = depk and not (is_supply ? prev <= bk - need : prev >= tk + need)
+                // dead on arrival if a candle since the impulse closed through its far edge
+                bool alive = true
+                if newly and k > 1
+                    for i = 1 to k - 1
+                        if is_supply ? close[i] > tk : close[i] < bk
+                            alive := false
+                            break
+                if newly and alive
+                    ok2 := true
+                    t2 := tk
+                    b2 := bk
+                    l2 := lk
+                    n2 := nk
+                    i2 := ik
+                    g2 := gk
+                    o2 := ok_
+                    mx2 := mxk
+                    break
+    else
+        ok2 := f2
+        [dep2, m2] = departs(is_supply, dep_bars, t2, b2, yard)
+        mx2 := m2
     bool found = ok1 or ok2
     float top = ok1 ? t1 : t2
     float btm = ok1 ? b1 : b2
@@ -465,7 +495,10 @@ create_zone(array<Zone> zones, bool is_supply, float z_top, float z_btm, int lef
     float top = flat ? (is_supply ? anchor : anchor + buffer) : z_top
     float btm = flat ? (is_supply ? anchor - buffer : anchor) : z_btm
     bool ok = not na(top) and not na(btm)
-    if (top - btm) > max_height_mult * yard_tf
+    // a zone taller than the limit still counts when price left it by at least twice its height (the sheet's 2x move):
+    // after a volatility burst the typical body lags, and a one candle base with a long wick is still the sheet's zone
+    float moved = na(mx) ? na : (is_supply ? btm - mx : mx - top)
+    if (top - btm) > max_height_mult * yard_tf and not (moved >= 2 * (top - btm))
         ok := false
     // A zone read from the timeframe's own base replaces an overlapping zone only when that zone is a drill-down
     // guess or a later base. An older zone that is still valid (never closed through) is always kept. If price has

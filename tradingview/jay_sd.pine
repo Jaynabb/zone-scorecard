@@ -142,6 +142,8 @@ type Zone
     float zc_px = na      // ... and its close
     int x_t = na          // latest visit: chart bar time of the candle that closed back out past the near edge (Exit entry)
     float x_px = na       // ... and its close
+    int it = na           // open time of the impulse candle (the candles after it are where retests can start)
+    bool fresh = true     // just created: the candles between its impulse and now have not been checked for retests yet
     float chk = na        // drill-down only: the furthest close of this timeframe seen between the base and the turn (for checking the rule)
 
 // slot 0 = Daily, 1 = Weekly, 2 = Monthly
@@ -487,6 +489,7 @@ create_zone(array<Zone> zones, bool is_supply, float z_top, float z_btm, int lef
         z.gap := gp
         z.gap_out := go
         z.ext := mx
+        z.it := imp_t
         z.os := broke_opposing(slot, is_supply, left_time, imp_t)
         zones.unshift(z)
         zones.trim(max_zones)
@@ -494,55 +497,89 @@ create_zone(array<Zone> zones, bool is_supply, float z_top, float z_btm, int lef
 // Break: a candle of the zone's own timeframe closes through the wick edge.
 // Retest: price comes back into the zone after a candle closed back outside it. Consecutive candles inside the zone
 // are one visit. A candle that wicks in and closes outside ends the visit, so the next entry is a new retest.
+// One candle of the zone's own timeframe against one zone. t is the chart bar time the candle is stamped with.
+// Returns 0 keep, 1 broken (a close through the wick edge), 2 retired (past its touch limit).
+step(Zone z, bool is_supply, int slot, float c, float h, float l, int t) =>
+    int res = 0
+    box b = z.b
+    float limit_level = is_supply ? b.get_top() : b.get_bottom()
+    bool broken = is_supply ? c >= limit_level : c <= limit_level
+    if broken
+        brk_t.unshift(t)
+        brk_k.unshift(slot * 2 + (is_supply ? 0 : 1))
+        brk_lt.unshift(z.lt)
+        if brk_t.size() > 300
+            brk_t.pop()
+            brk_k.pop()
+            brk_lt.pop()
+        res := 1
+    else
+        bool touching = is_supply ? h >= b.get_bottom() : l <= b.get_top()
+        bool closed_out = is_supply ? c < b.get_bottom() : c > b.get_top()
+        if z.touches == 0
+            z.ext := is_supply ? (na(z.ext) ? l : math.min(z.ext, l)) : (na(z.ext) ? h : math.max(z.ext, h))
+        bool was_in = z.inside or touching
+        if touching and not z.inside
+            z.touches += 1
+            z.d_prev := z.depth
+            z.zc_t := na
+            z.zc_px := na
+            z.x_t := na
+            z.x_px := na
+            if z.touches == 1
+                z.e_t := t
+        // the two confirmations the Zone and Exit entries wait for, once per visit
+        if touching and not closed_out and na(z.zc_t)
+            z.zc_t := t
+            z.zc_px := c
+        if was_in and closed_out and na(z.x_t)
+            z.x_t := t
+            z.x_px := c
+        if touching
+            float hgt = b.get_top() - b.get_bottom()
+            if hgt > 0
+                float pen = is_supply ? (h - b.get_bottom()) / hgt : (b.get_top() - l) / hgt
+                z.depth := math.max(z.depth, math.min(math.max(pen, 0.0), 1.0))
+        z.inside := touching and not closed_out
+        int tlim = one_done and timeframe.in_seconds(slot == 0 ? TF0 : slot == 1 ? TF1 : TF2) < 3600 ? 1 : max_touches
+        if tlim > 0 and z.touches > tlim
+            res := 2
+    res
+
 monitor(array<Zone> zones, bool is_supply, int slot, float c, float h, float l) =>
     if zones.size() > 0 and not na(c)
         for i = zones.size() - 1 to 0
             Zone z = zones.get(i)
-            box b = z.b
-            float limit_level = is_supply ? b.get_top() : b.get_bottom()
-            bool broken = is_supply ? c >= limit_level : c <= limit_level
-            if broken
-                brk_t.unshift(time)
-                brk_k.unshift(slot * 2 + (is_supply ? 0 : 1))
-                brk_lt.unshift(z.lt)
-                if brk_t.size() > 300
-                    brk_t.pop()
-                    brk_k.pop()
-                    brk_lt.pop()
-                b.delete()
+            if step(z, is_supply, slot, c, h, l, time) > 0
+                z.b.delete()
                 zones.remove(i)
-                continue
-            bool touching = is_supply ? h >= b.get_bottom() : l <= b.get_top()
-            bool closed_out = is_supply ? c < b.get_bottom() : c > b.get_top()
-            if z.touches == 0
-                z.ext := is_supply ? (na(z.ext) ? l : math.min(z.ext, l)) : (na(z.ext) ? h : math.max(z.ext, h))
-            bool was_in = z.inside or touching
-            if touching and not z.inside
-                z.touches += 1
-                z.d_prev := z.depth
-                z.zc_t := na
-                z.zc_px := na
-                z.x_t := na
-                z.x_px := na
-                if z.touches == 1
-                    z.e_t := time
-            // the two confirmations the Zone and Exit entries wait for, once per visit
-            if touching and not closed_out and na(z.zc_t)
-                z.zc_t := time
-                z.zc_px := c
-            if was_in and closed_out and na(z.x_t)
-                z.x_t := time
-                z.x_px := c
-            if touching
-                float hgt = b.get_top() - b.get_bottom()
-                if hgt > 0
-                    float pen = is_supply ? (h - b.get_bottom()) / hgt : (b.get_top() - l) / hgt
-                    z.depth := math.max(z.depth, math.min(math.max(pen, 0.0), 1.0))
-            z.inside := touching and not closed_out
-            int tlim = one_done and timeframe.in_seconds(slot == 0 ? TF0 : slot == 1 ? TF1 : TF2) < 3600 ? 1 : max_touches
-            if tlim > 0 and z.touches > tlim
-                b.delete()
-                zones.remove(i)
+
+// A zone confirmed late (its follow-through departed only some candles after the impulse) did not exist while those
+// candles printed, so retests among them went uncounted and the zone read as fresh. On its first bar, replay the
+// chart bars since the impulse candle closed through the same per-candle check, oldest first.
+catch_up(array<Zone> zones, bool is_supply, int slot, float c, float h, float l) =>
+    if zones.size() > 0
+        int tf_ms = timeframe.in_seconds(slot == 0 ? TF0 : slot == 1 ? TF1 : TF2) * 1000
+        for i = zones.size() - 1 to 0
+            Zone z = zones.get(i)
+            if z.fresh
+                z.fresh := false
+                int res = 0
+                if not na(z.it)
+                    int n = 0
+                    for q = 1 to 300
+                        if na(time[q]) or time[q] < z.it + tf_ms
+                            break
+                        n := q
+                    if n > 0
+                        for q = n to 1
+                            if not na(c[q])
+                                res := step(z, is_supply, slot, c[q], h[q], l[q], time[q])
+                                if res > 0
+                                    break
+                if res > 0
+                    z.b.delete()
+                    zones.remove(i)
 
 // Adds a reported base as a zone once, keyed by its leftmost candle time.
 add_once(array<Zone> zones, bool is_supply, int slot, bool found, float top, float btm, int lt, int n, int imp_t, float atr_tf, bool gp, bool go, float mx) =>
@@ -648,6 +685,8 @@ process_slot(int slot, int mode, bool show, array<Zone> sup, array<Zone> dem, bo
         else
             add_once(sup, true, slot, h_sf, h_st, h_sb, h_stm, h_sn, h_si, h_a, h_sg, h_so, h_sm)
             add_once(dem, false, slot, h_df, h_dt, h_db, h_dtm, h_dn, h_di, h_a, h_dg, h_do, h_dm)
+            catch_up(sup, true, slot, h_c, h_h, h_l)
+            catch_up(dem, false, slot, h_c, h_h, h_l)
             // On live bars a higher timeframe candle is still forming, so its close would kill a zone that history
             // (which only sees finished candles) keeps. Live, a zone is judged once that candle has closed
             if not (barstate.isrealtime and mode == 1)

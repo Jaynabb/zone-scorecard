@@ -74,7 +74,7 @@ int ema_slow_len = input.int(21, '', minval=1, group=ema_group, inline='ema')
 int ema_long_len = input.int(50, '', minval=1, group=ema_group, inline='ema')
 string ema_rule = input.string('Close beyond fast EMA', 'EMA Flip Rule', options=['Close beyond fast EMA', 'Full candle beyond all 3'], group=ema_group, tooltip='Close beyond fast EMA: a candle closing below the fast EMA flips the signal to SELL, a close above it flips it to BUY. Catches trend changes early but flips more often. Full candle beyond all 3: the whole candle, wicks included, must sit beyond all three EMAs (slower, fewer flips; the version backtested on 2026-11-22).')
 bool ema_fast_rule = ema_rule == 'Close beyond fast EMA'
-bool ema_required = input.bool(true, 'Require EMA Agreement For GO', group=ema_group, tooltip='On: a target zone is only a GO when the standing EMA signal points its way (buy for demand, sell for supply). Otherwise the label says WAIT FOR EMA.')
+bool ema_required = input.bool(true, 'Require EMA Agreement For GO', group=ema_group, tooltip='On: a target zone is only a GO when the standing EMA signal points its way (buy for demand, sell for supply). Otherwise the label says WAIT FOR EMA. Only applies when the Low timeframe is under 1 hour (Scalping): backtests on 1H and 4H showed the EMA filter there skipped trades that did better than the ones it kept.')
 bool show_ema_sig = input.bool(true, 'Mark EMA Buy / Sell Candles', group=ema_group, tooltip='A small triangle under the candle that flips the EMA signal to BUY and over the candle that flips it to SELL, by the EMA Flip Rule.')
 bool show_exit = input.bool(true, '9 EMA Exit On Target Zones', group=ema_group, tooltip="Trade management after the first retest of a Low timeframe target zone (entry at the near edge, stop at the far edge): at +1R move the stop to breakeven, then exit on the first Low timeframe candle that closes back across the fast EMA. Backtested 2026-11-23 on 5m: +0.14R per trade against -0.05R for a fixed 2R target, and better than fixed 2R in 13 of 15 symbol and timeframe tests. Shown as a TRADE line on the target label with BE and EXIT markers on the chart.")
 color ema_fast_col = input.color(#F5C542, 'Fast / Mid / Slow Colors', group=ema_group, inline='emac')
@@ -115,6 +115,10 @@ bool show_hint = input.bool(true, 'Show How To Take The Trade', group=visual_gro
 int scalp_min = input.int(16, 'Valid Setup Score When Low TF Under 1 Hour', minval=0, maxval=20, group=scan_group, tooltip='Used instead of Valid Setup Score when the Low timeframe is under 1 hour (Scalping). With One And Done on, every tradable zone there is fresh and scores the full 4 for purity, so purity no longer separates setups; the higher bar makes the other checks earn it.')
 // the score a GO needs: higher when the Low timeframe is under 1 hour (see scalp_min)
 int go_min = timeframe.in_seconds(TF0) < 3600 ? scalp_min : alert_min
+// EMA agreement only gates a GO when the Low timeframe is under 1 hour. Backtested 2026-11-23 on first touches of fresh
+// zones: on 1H the trades the 9 EMA signal was against did better (+0.10R) than the ones it agreed with (+0.03R), and on
+// 4H the same (+0.07R against, -0.02R with), so above 1 hour the filter only throws away good trades
+bool ema_need = ema_required and timeframe.in_seconds(TF0) < 3600
 
 //-----------------------------------------------------------------------------
 // TYPES, ARRAYS & GLOBALS
@@ -1126,7 +1130,7 @@ entry_hint(Zone z, bool is_supply, int et, int pur, int s_trend) =>
 // extreme most likely printed before price reached the zone. Once a candle reaches +1R the stop moves to breakeven
 // from the next candle on; after that the trade ends on the first Low timeframe candle that closes back across the
 // fast EMA and closed after the +1R candle. Only trades the standing EMA signal agreed with when Require EMA
-// Agreement is on. Returns [state, label line, bars back to the entry, bars back to the +1R candle, bars back to the
+// Agreement is on and the Low timeframe is under 1 hour. Returns [state, label line, bars back to the entry, bars back to the +1R candle, bars back to the
 // end, R at the end]. state: 0 no trade, 1 open, 2 stop at breakeven, 3 9 EMA exit, 4 stopped, 5 breakeven stop.
 trade_walk(Zone z, bool is_supply, int et) =>
     int state = 0
@@ -1149,7 +1153,7 @@ trade_walk(Zone z, bool is_supply, int et) =>
             if time[k] < t0
                 break
             n := k
-        if n >= 0 and time[n + 1] < t0 and (not ema_required or ema_sig[n] == d)
+        if n >= 0 and time[n + 1] < t0 and (not ema_need or ema_sig[n] == d)
             state := 1
             int t1r = na
             for k = (et == 1 ? n : n - 1) to 0
@@ -1332,13 +1336,13 @@ score_zone(Zone z, bool is_supply, float r_top, float r_btm, box opp, string opp
 // Entry timing, by entry type (see ENTRY TYPES). A Touch entry is taken on the retest, or before any retest when the
 // impulse gapped away from the base. A Zone entry needs a candle of the zone's timeframe to have closed inside the zone
 // on this visit. An Exit entry is live on the candle after the one that closed back out. A go needs the score as well.
-// ema_n: 1 when the standing EMA signal points the zone's way (see ema_conf). With Require EMA Agreement on,
+// ema_n: 1 when the standing EMA signal points the zone's way (see ema_conf). With Require EMA Agreement on (Low TF under 1 hour),
 // a zone whose timing is right but whose EMA signal is not with it waits for the EMA
 entry_state(Zone z, int total, int ema_n, int slot, int et) =>
     bool valid = total >= go_min
     string tf = tf_name(slot == 0 ? TF0 : slot == 1 ? TF1 : TF2)
     bool timing = et == 0 ? false : et == 1 ? (z.inside or (z.gap_out and z.touches == 0)) : et == 2 ? (z.inside and not na(z.zc_t)) : (not z.inside and visit_live(z))
-    bool ema_ok = not ema_required or ema_n == 1
+    bool ema_ok = not ema_need or ema_n == 1
     bool go = valid and timing and ema_ok
     string why = et == 2 ? "zone entry, a " + tf + " candle closed inside" : et == 3 ? "exit entry, a " + tf + " candle closed back out" :
          slot == 1 and z.inside ? "touch entry, " + tf_name(TF1) + " first touch, no " + tf_name(TF0) + " zone inside" : z.inside ? "touch entry, retest now" : "gap away, no retest needed"

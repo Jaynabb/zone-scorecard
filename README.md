@@ -42,4 +42,4 @@ One-time setup:
 
 Endpoints: `POST /api/setup-alert?key=...` receives the alert JSON; `GET /api/setups` lists the latest reports.
 
-The indicator's Trading Style setting (Position, Swing, Day trader, Scalper, Custom) picks the Low, Mid and High timeframes and matches the presets on the sheet.
+The indicator's Trading Style setting (Scalping 5m / 30m / 1H, Scalping 5m / 15m / 1H, Day Trading 1H / 4H / D, Swing Trading 4H / D / W, Longer Swing D / W / M, Custom) picks the Low, Mid and High timeframes and matches the presets on the sheet.

@@ -401,10 +401,11 @@ footer { margin-top: 40px; padding: 22px 0 40px; border-top: 1px solid var(--rul
   var TIERS = [14, 16, 18];
 
   var PRESETS = {
-    scalper:  { label: "Scalper",         low: "5m",    mid: "15m",    high: "1H" },
-    day:      { label: "Day trader",      low: "15m",   mid: "1H",     high: "4H" },
-    swing:    { label: "Swing trader",    low: "4H",    mid: "Daily",  high: "Weekly" },
-    position: { label: "Position trader", low: "Daily", mid: "Weekly", high: "Monthly" }
+    scalper:  { label: "Scalping (5m / 30m / 1H)",   low: "5m",    mid: "30m",    high: "1H" },
+    scalp15:  { label: "Scalping (5m / 15m / 1H)",   low: "5m",    mid: "15m",    high: "1H" },
+    day:      { label: "Day Trading (1H / 4H / D)",  low: "1H",    mid: "4H",     high: "Daily" },
+    swing:    { label: "Swing Trading (4H / D / W)", low: "4H",    mid: "Daily",  high: "Weekly" },
+    position: { label: "Longer Swing (D / W / M)",   low: "Daily", mid: "Weekly", high: "Monthly" }
   };
 
   var CHECKS = [

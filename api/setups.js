@@ -2,8 +2,9 @@
 import { send } from "./_shared.js";
 import { hasRedis, redis, pipeline } from "./_redis.js";
 
-// Styles shown on the board. Jay dropped day trading on 2026-11-18: Position trader only. Add a style here to show it again.
-export const BOARD_STYLES = new Set(["Position trader"]);
+// Styles shown on the board. Jay dropped day trading on 2026-11-18: the Daily / Weekly / Monthly style only, under its
+// old name (alerts made before v97) and its new one. Add a style here to show it again.
+export const BOARD_STYLES = new Set(["Position trader", "Longer Swing"]);
 // A report older than this is stale (alert deleted or dead) and is removed from the store on the next read.
 const MAX_AGE_MS = 24 * 60 * 60 * 1000;
 

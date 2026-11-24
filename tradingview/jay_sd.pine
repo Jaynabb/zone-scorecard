@@ -9,15 +9,15 @@ indicator("Jay S&D", overlay=true, max_bars_back=500, max_boxes_count=500, max_l
 // slot 2 = High (range and backing). Matches the presets on the Zone Scorecard site.
 //-----------------------------------------------------------------------------
 string style_group = 'Trading Style'
-string style = input.string('Position trader', 'Trading Style', options=['Position trader', 'Swing trader', 'Day trader', 'Scalper', 'Custom'], group=style_group, tooltip='Position: Daily / Weekly / Monthly. Swing: 4H / Daily / Weekly. Day trader: 15m / 1H / 4H. Scalper: 5m / 15m / 1H. Low is where the entry zones (targets) come from, Mid is the trend, High is the range and the backing. Custom uses the three inputs below. Changing any of the three inputs below away from Daily / Weekly / Monthly also switches to them, whatever style is picked.')
+string style = input.string('Longer Swing (D / W / M)', 'Trading Style', options=['Scalping (5m / 30m / 1H)', 'Scalping (5m / 15m / 1H)', 'Day Trading (1H / 4H / D)', 'Swing Trading (4H / D / W)', 'Longer Swing (D / W / M)', 'Custom'], group=style_group, tooltip='Low / Mid / High timeframes, from the trading sheet. Scalping (short-term): 5 Min / 30 or 15 Min / Hourly. Day trading: 1 hr / 4 hr / Daily. Swing (weekly trading): 4 hr / Daily / Weekly. Longer swing (monthly trading): Daily / Weekly / Monthly. Low is where the entry zones (targets) come from, Mid is the trend, High is the range and the backing. Custom uses the three inputs below. Changing any of the three inputs below away from Daily / Weekly / Monthly also switches to them, whatever style is picked.')
 string tf_low_in = input.timeframe('D', 'Custom Low Timeframe', group=style_group)
 string tf_mid_in = input.timeframe('W', 'Custom Mid Timeframe', group=style_group)
 string tf_high_in = input.timeframe('M', 'Custom High Timeframe', group=style_group)
 // editing the custom timeframes away from their defaults means the trader wants them, even with a preset style still picked
 bool use_custom = style == 'Custom' or timeframe.in_seconds(tf_low_in) != timeframe.in_seconds('D') or timeframe.in_seconds(tf_mid_in) != timeframe.in_seconds('W') or timeframe.in_seconds(tf_high_in) != timeframe.in_seconds('M')
-string TF0 = use_custom ? tf_low_in : style == 'Position trader' ? 'D' : style == 'Swing trader' ? '240' : style == 'Day trader' ? '15' : '5'
-string TF1 = use_custom ? tf_mid_in : style == 'Position trader' ? 'W' : style == 'Swing trader' ? 'D' : style == 'Day trader' ? '60' : '15'
-string TF2 = use_custom ? tf_high_in : style == 'Position trader' ? 'M' : style == 'Swing trader' ? 'W' : style == 'Day trader' ? '240' : '60'
+string TF0 = use_custom ? tf_low_in : style == 'Longer Swing (D / W / M)' ? 'D' : style == 'Swing Trading (4H / D / W)' ? '240' : style == 'Day Trading (1H / 4H / D)' ? '60' : '5'
+string TF1 = use_custom ? tf_mid_in : style == 'Longer Swing (D / W / M)' ? 'W' : style == 'Swing Trading (4H / D / W)' ? 'D' : style == 'Day Trading (1H / 4H / D)' ? '240' : style == 'Scalping (5m / 30m / 1H)' ? '30' : '15'
+string TF2 = use_custom ? tf_high_in : style == 'Longer Swing (D / W / M)' ? 'M' : style == 'Swing Trading (4H / D / W)' ? 'W' : style == 'Day Trading (1H / 4H / D)' ? 'D' : '60'
 if barstate.isfirst and not (timeframe.in_seconds(TF0) < timeframe.in_seconds(TF1) and timeframe.in_seconds(TF1) < timeframe.in_seconds(TF2))
     runtime.error('Custom timeframes must go Low < Mid < High, for example 5 minutes / 30 minutes / 2 hours.')
 // true on the first chart bar of a new candle of each timeframe
@@ -990,7 +990,7 @@ trend_line(string nm, int st, float cp, float sh1, float sh2, float sl1, float s
 // swing confirmed by the current week. Without it, a Daily chart sees last week's closed state, so a fresh higher low
 // (AMD 402.10) is missing and the control point lags. Only the last bar's value is used for scoring
 [t_st, t_cp, t_sh1, t_sh2, t_sl1, t_sl2, t_cons] = request.security(syminfo.tickerid, trend_tf, trend_pack(), lookahead=timeframe.in_seconds(trend_tf) > chart_sec ? barmerge.lookahead_on : barmerge.lookahead_off)
-// the Low timeframe trend (Daily for the Position style), shown on the label when it pulls against the Mid trend
+// the Low timeframe trend (Daily for the Longer Swing style), shown on the label when it pulls against the Mid trend
 [l_st, l_cp, l_sh1, l_sh2, l_sl1, l_sl2, l_cons] = request.security(syminfo.tickerid, TF0, trend_pack(), lookahead=timeframe.in_seconds(TF0) > chart_sec ? barmerge.lookahead_on : barmerge.lookahead_off)
 // the High timeframe trend, shown above the others for the bigger picture (not scored)
 [ht_st, ht_cp, ht_sh1, ht_sh2, ht_sl1, ht_sl2, ht_cons] = request.security(syminfo.tickerid, TF2, trend_pack(), lookahead=timeframe.in_seconds(TF2) > chart_sec ? barmerge.lookahead_on : barmerge.lookahead_off)
@@ -1168,7 +1168,7 @@ if barstate.islast and show_trend
         trend_box.cell(0, 2, trend_line(tf_name(TF0), l_st, l_cp, l_sh1, l_sh2, l_sl1, l_sl2, l_cons), text_color=color.new(color.white, 30), text_size=size.small, text_halign=text.align_left)
     else
         trend_box.cell(0, 2, "", text_size=size.small)
-    // the Low timeframe far below the chart (Scalper on a Daily chart) means hundreds of candles per bar: slow and coarse
+    // the Low timeframe far below the chart (Scalping on a Daily chart) means hundreds of candles per bar: slow and coarse
     trend_box.cell(0, 3, "EMA SIGNAL: " + ema_sig_s(), text_color=ema_sig == 1 ? color.new(#2ECC71, 10) : ema_sig == -1 ? color.new(#FF6B6B, 10) : color.new(color.white, 30), text_size=size.small, text_halign=text.align_left)
     if timeframe.in_seconds(TF0) * 100 < chart_sec
         trend_box.cell(0, 4, "Chart timeframe is far above the Low timeframe (" + tf_name(TF0) + "). Drop the chart to " + tf_name(TF1) + " or lower for reliable zones.", text_color=color.orange, text_size=size.small, text_halign=text.align_left)
@@ -1382,7 +1382,7 @@ if barstate.islast
     // fires on every bar close, with an empty setups list when there is no target, so the board can tell a silent alert from a chart with nothing to report
     if alerts_on and barstate.isconfirmed
         string trend_s = t_cons ? "CONSOLIDATION" : t_st == 1 ? "UP" : t_st == -1 ? "DOWN" : "RANGE"
-        string msg = '{"symbol":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","chart_tf":"' + timeframe.period + '","style":"' + (use_custom ? 'Custom' : style) + '","low_tf":"' + tf_name(TF0) + '","mid_tf":"' + tf_name(TF1) + '","high_tf":"' + tf_name(TF2) + '","price":' + num(close) + ',"bar_time":' + str.tostring(time) + ',"trend":"' + trend_s + '","low_trend":"' + (l_st == 1 ? "UP" : l_st == -1 ? "DOWN" : "RANGE") + '","control_point":' + num(t_cp) + ',"range_top":' + num(r_top) + ',"range_btm":' + num(r_btm) + ',"alert_min":' + str.tostring(alert_min) + ',"setups":[' + s_json + (s_json != "" and d_json != "" ? "," : "") + d_json + ']}'
+        string msg = '{"symbol":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","chart_tf":"' + timeframe.period + '","style":"' + (use_custom ? 'Custom' : str.split(style, ' (').get(0)) + '","low_tf":"' + tf_name(TF0) + '","mid_tf":"' + tf_name(TF1) + '","high_tf":"' + tf_name(TF2) + '","price":' + num(close) + ',"bar_time":' + str.tostring(time) + ',"trend":"' + trend_s + '","low_trend":"' + (l_st == 1 ? "UP" : l_st == -1 ? "DOWN" : "RANGE") + '","control_point":' + num(t_cp) + ',"range_top":' + num(r_top) + ',"range_btm":' + num(r_btm) + ',"alert_min":' + str.tostring(alert_min) + ',"setups":[' + s_json + (s_json != "" and d_json != "" ? "," : "") + d_json + ']}'
         alert(msg, alert.freq_once_per_bar_close)
 
 alertcondition(be_now, "Move stop to breakeven", "{{ticker}}: the target zone trade reached +1R, move the stop to breakeven")

@@ -845,6 +845,25 @@ method hide_all(array<Zone> zones, bool is_supply, int slot) =>
             b.set_border_color(color.new(base, 100))
             b.set_text("")
 
+// True when a zone of a lower timeframe slot covers the same price range (each edge within a tenth of the height): the
+// higher timeframe zone was read from that base, so drawing both stacks two boxes on one level. The lower one is drawn
+// and its label shows the higher timeframe as backing
+dup_lower(int slot, bool is_supply, box b) =>
+    bool hit = false
+    float h = b.get_top() - b.get_bottom()
+    if slot > 0 and h > 0
+        for s2 = 0 to slot - 1
+            array<Zone> arr = s2 == 0 ? (is_supply ? sup_d : dem_d) : (is_supply ? sup_w : dem_w)
+            if arr.size() > 0
+                for i = 0 to arr.size() - 1
+                    box lb = arr.get(i).b
+                    if math.abs(lb.get_top() - b.get_top()) <= 0.1 * h and math.abs(lb.get_bottom() - b.get_bottom()) <= 0.1 * h
+                        hit := true
+                        break
+            if hit
+                break
+    hit
+
 // Draw the nearest show_n zones on this side in full, the rest faint (Show All Valid Zones). White outline on the closest one if asked.
 // With use_filter, a zone is eligible only if it overlaps one of the anchor boxes (the visible chart timeframe zones).
 // Returns the boxes that ended up visible.
@@ -883,7 +902,8 @@ refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<bo
             box b = z.b
             [bk, tag] = backing(slot, is_supply, b)
             bool is_target = shown == 0 and do_highlight
-            b.set_bgcolor(color.new(base, is_target ? target_tr : tr))
+            bool dup = not is_target and dup_lower(slot, is_supply, b)
+            b.set_bgcolor(color.new(base, dup ? 100 : is_target ? target_tr : tr))
             b.set_border_style(line.style_solid)
             string side_nm = nm + (is_supply ? " SUPPLY" : " DEMAND")
             string info = side_nm + " " + str.tostring(b.get_bottom(), format.mintick) + " - " + str.tostring(b.get_top(), format.mintick) + " | base " + str.tostring(z.base_n) + " | " + str.format_time(z.lt, "yyyy-MM-dd") + (z.gap ? " | gap refined" : "") + (z.via_lower ? " | base read below" + (na(z.chk) ? "" : (is_supply ? " | highest close since base " : " | lowest close since base ") + str.tostring(z.chk, format.mintick)) : "")
@@ -896,8 +916,10 @@ refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<bo
                 tgt_tags.push(tag)
                 tgt_slots.push(slot)
             else
-                b.set_border_color(base)
+                b.set_border_color(dup ? color.new(base, 100) : base)
                 b.set_border_width(w)
+            if dup
+                b.set_text("")
             dist.set(best, na)
             shown_boxes.push(b)
             shown_flag.set(best, true)
@@ -914,7 +936,7 @@ refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<bo
                 box b = z.b
                 float gap = b.get_bottom() > close ? b.get_bottom() - close : b.get_top() < close ? close - b.get_top() : 0.0
                 bool near = na(reach) or gap <= reach
-                if near and not shown_flag.get(i) and not (use_filter and not anchors.overlaps_any(b.get_top(), b.get_bottom()))
+                if near and not shown_flag.get(i) and not (use_filter and not anchors.overlaps_any(b.get_top(), b.get_bottom())) and not dup_lower(slot, is_supply, b)
                     // outline only, bright green for demand and red for supply, so old zones read apart from the drawn ones
                     b.set_bgcolor(color.new(base, 100))
                     b.set_border_color(is_supply ? color.new(#FF5252, 25) : color.new(#2ECC71, 25))

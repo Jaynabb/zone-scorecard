@@ -113,7 +113,7 @@ bool label_targets_only = input.bool(true, 'Label Only The Target Zones', group=
 bool mid_entry = input.bool(true, 'Enter On First Mid TF Touch', group=filt_group, tooltip="When price makes its first touch of a Mid timeframe zone and no Low timeframe zone of the same side sits inside it yet, that Mid zone becomes the target and the touch is the entry (stop past its far edge). Waiting for a Low timeframe zone to form from the bounce and get retested mostly missed the move. Backtested 2026-11-23: Daily inside Weekly +0.20R per trade entering on the Weekly touch against -0.06R waiting; 1H in 4H and 5m in 30m pointed the same way. The score and EMA rules still apply.")
 bool show_hint = input.bool(true, 'Show How To Take The Trade', group=visual_group, tooltip="Adds a HOW line to each target label: which of the course's three entries the zone calls for and the steps to take it. TOUCH (purity 4, fresh zone): limit order at the near edge. ZONE (purity 2, with the Mid trend): wait for a candle to close inside the zone, then enter inside it. EXIT (purity 0, or counter trend): let price go in and turn, enter when a candle closes back out. Stop past the far edge in all three.")
 int scalp_min = input.int(16, 'Valid Setup Score When Low TF Under 1 Hour', minval=0, maxval=20, group=scan_group, tooltip='Used instead of Valid Setup Score when the Low timeframe is under 1 hour (Scalping). With One And Done on, every tradable zone there is fresh and scores the full 4 for purity, so purity no longer separates setups; the higher bar makes the other checks earn it.')
-bool show_all = input.bool(true, 'Show All Valid Zones', group=visual_group, tooltip='Every zone price has not closed through stays on the chart. The nearest ones per side are drawn in full (Show Nearest Zones Per Side); the rest are drawn faint with a dashed outline, including zones past their touch limit (One And Done), which are never targets. So when price comes back to old supply or demand it is already marked.')
+bool show_all = input.bool(true, 'Show All Valid Zones', group=visual_group, tooltip='Every zone price has not closed through stays on the chart. The nearest ones per side are drawn in full (Show Nearest Zones Per Side); the rest are drawn as a dashed outline only (green demand, red supply), including zones past their touch limit (One And Done), which are never targets. So when price comes back to old supply or demand it is already marked.')
 float faint_reach = input.float(10.0, 'Faint Zones Within (x typical body)', minval=0.0, step=1.0, group=visual_group, tooltip='Show All Valid Zones draws a faint zone only when it is within this many typical candle bodies of its own timeframe from price (about 10 bodies: the Daily zones a few days of travel away, the Monthly zones a few months away). 0 = no limit. Faint zones of a timeframe below the chart timeframe are never drawn; the nearest zones and targets still are.')
 // the score a GO needs: higher when the Low timeframe is under 1 hour (see scalp_min)
 int go_min = timeframe.in_seconds(TF0) < 3600 ? scalp_min : alert_min
@@ -854,8 +854,9 @@ refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<bo
                 float gap = b.get_bottom() > close ? b.get_bottom() - close : b.get_top() < close ? close - b.get_top() : 0.0
                 bool near = na(reach) or gap <= reach
                 if near and not shown_flag.get(i) and not (use_filter and not anchors.overlaps_any(b.get_top(), b.get_bottom()))
-                    b.set_bgcolor(color.new(base, 92))
-                    b.set_border_color(color.new(base, 55))
+                    // outline only, bright green for demand and red for supply, so old zones read apart from the drawn ones
+                    b.set_bgcolor(color.new(base, 100))
+                    b.set_border_color(is_supply ? color.new(#FF5252, 25) : color.new(#2ECC71, 25))
                     b.set_border_width(1)
                     b.set_border_style(line.style_dashed)
                     string nm2 = nm + (is_supply ? " SUPPLY" : " DEMAND")

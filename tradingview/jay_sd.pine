@@ -111,6 +111,7 @@ bool show_zone_info = input.bool(false, 'Zone Facts On Every Box', group=visual_
 bool label_targets_only = input.bool(true, 'Label Only The Target Zones', group=visual_group, tooltip='Only the white outlined zones (the nearest on each side) get a label: timeframe, side, price range and the word TARGET, placed in the margin right of the last candle. Other boxes stay unlabeled. Turn off to also print timeframe and side inside every box.')
 // added last so earlier inputs keep their ids and existing chart settings stay put
 bool mid_entry = input.bool(true, 'Enter On First Mid TF Touch', group=filt_group, tooltip="When price makes its first touch of a Mid timeframe zone and no Low timeframe zone of the same side sits inside it yet, that Mid zone becomes the target and the touch is the entry (stop past its far edge). Waiting for a Low timeframe zone to form from the bounce and get retested mostly missed the move. Backtested 2026-11-23: Daily inside Weekly +0.20R per trade entering on the Weekly touch against -0.06R waiting; 1H in 4H and 5m in 30m pointed the same way. The score and EMA rules still apply.")
+bool show_hint = input.bool(true, 'Show How To Take The Trade', group=visual_group, tooltip="Adds a HOW line to each target label: which of the course's three entries the zone calls for and the steps to take it. TOUCH (purity 4, fresh zone): limit order at the near edge. ZONE (purity 2, with the Mid trend): wait for a candle to close inside the zone, then enter inside it. EXIT (purity 0, or counter trend): let price go in and turn, enter when a candle closes back out. Stop past the far edge in all three.")
 
 //-----------------------------------------------------------------------------
 // TYPES, ARRAYS & GLOBALS
@@ -128,6 +129,12 @@ type Zone
     bool gap = false      // the base walk stopped at a price gap, so the zone covers only the candles on the impulse side of it
     bool gap_out = false  // the impulse opened away from the base with a gap: the one case where the trade is a go before any retest
     int e_t = na          // chart bar time of the first retest: the entry the 9 EMA exit manages
+    int slot = 0          // 0 Low, 1 Mid, 2 High timeframe
+    float d_prev = 0.0    // deepest retest before the latest visit (purity of the latest visit is scored on it)
+    int zc_t = na         // latest visit: chart bar time of the first candle that closed inside the zone (Zone entry)
+    float zc_px = na      // ... and its close
+    int x_t = na          // latest visit: chart bar time of the candle that closed back out past the near edge (Exit entry)
+    float x_px = na       // ... and its close
     float chk = na        // drill-down only: the furthest close of this timeframe seen between the base and the turn (for checking the rule)
 
 // slot 0 = Daily, 1 = Weekly, 2 = Monthly
@@ -467,6 +474,7 @@ create_zone(array<Zone> zones, bool is_supply, float z_top, float z_btm, int lef
         color base = zone_color(slot, is_supply)
         box b = box.new(left_time, top, time, btm, xloc=xloc.bar_time, border_color=base, border_width=w, bgcolor=color.new(base, tr), text="", text_color=label_color, text_size=size.small, text_halign=slot == 0 ? text.align_right : slot == 1 ? text.align_center : text.align_left, text_valign=text.align_center, extend=extend.none)
         Zone z = Zone.new(b)
+        z.slot := slot
         z.base_n := n
         z.lt := left_time
         z.gap := gp
@@ -501,10 +509,23 @@ monitor(array<Zone> zones, bool is_supply, int slot, float c, float h, float l) 
             bool closed_out = is_supply ? c < b.get_bottom() : c > b.get_top()
             if z.touches == 0
                 z.ext := is_supply ? (na(z.ext) ? l : math.min(z.ext, l)) : (na(z.ext) ? h : math.max(z.ext, h))
+            bool was_in = z.inside or touching
             if touching and not z.inside
                 z.touches += 1
+                z.d_prev := z.depth
+                z.zc_t := na
+                z.zc_px := na
+                z.x_t := na
+                z.x_px := na
                 if z.touches == 1
                     z.e_t := time
+            // the two confirmations the Zone and Exit entries wait for, once per visit
+            if touching and not closed_out and na(z.zc_t)
+                z.zc_t := time
+                z.zc_px := c
+            if was_in and closed_out and na(z.x_t)
+                z.x_t := time
+                z.x_px := c
             if touching
                 float hgt = b.get_top() - b.get_bottom()
                 if hgt > 0
@@ -1057,6 +1078,46 @@ ema_conf(Zone z, bool is_supply) =>
     string txt = "EMA " + (n == 1 ? "CONFLUENCE" : n == -1 ? "AGAINST" : "NONE") + " | " + ema_sig_s()
     [n, txt]
 
+// ENTRY TYPES (TradePhantoms course). The purity of a visit decides how it is traded:
+//   1 TOUCH: purity 4, the first retrace of a fresh zone. Limit order at the near edge.
+//   2 ZONE:  purity 2 (retouched once, under 50% deep) and a trend trade. Enter inside the zone after a candle closes in it.
+//   3 EXIT:  purity 0, or a counter trend zone at purity 2. Let price go in and turn, enter on the close back out.
+// Backtest (entry_types_backtest.py, 9 EMA exit): on 1H and 4H zones Zone and Exit entries on retouched zones made money
+// on top of the fresh touches; on 5m zones the Exit entries lost, which One And Done already rules out.
+// A visit is live while price is in the zone, or on the zone timeframe candle right after the one that closed back out.
+visit_live(Zone z) =>
+    int ms = timeframe.in_seconds(z.slot == 0 ? TF0 : z.slot == 1 ? TF1 : TF2) * 1000
+    z.inside or (not na(z.x_t) and time - z.x_t <= ms)
+
+// Purity the sheet's way, counting only the visits before the one being traded: the latest visit when latest is true,
+// otherwise the next one.
+purity_of(Zone z, bool latest) =>
+    int before = latest ? math.max(z.touches - 1, 0) : z.touches
+    float dp = latest ? z.d_prev : z.depth
+    before == 0 ? 4 : before == 1 and dp < 0.5 ? 2 : 0
+
+entry_type(int pur, int s_trend) =>
+    pur == 4 ? 1 : pur == 2 and s_trend == 4 ? 2 : 3
+
+// One And Done: a zone under 1 hour that has had its touch takes no second entry (0 = none)
+used_up(Zone z) =>
+    one_done and timeframe.in_seconds(z.slot == 0 ? TF0 : z.slot == 1 ? TF1 : TF2) < 3600 and z.touches >= 1 and not z.inside
+
+entry_name(int et) =>
+    et == 1 ? "TOUCH ENTRY" : et == 2 ? "ZONE ENTRY" : "EXIT ENTRY"
+
+// The HOW line: the steps for the entry this zone calls for
+entry_hint(Zone z, bool is_supply, int et, int pur, int s_trend) =>
+    float near = is_supply ? z.b.get_bottom() : z.b.get_top()
+    float far = is_supply ? z.b.get_top() : z.b.get_bottom()
+    string side = is_supply ? "sell" : "buy"
+    string tf = tf_name(z.slot == 0 ? TF0 : z.slot == 1 ? TF1 : TF2)
+    string stop = "stop just past " + str.tostring(far, format.mintick)
+    et == 0 ? "HOW: no trade here. Zones under 1 hour are one and done and this one has had its touch; it is removed when price comes back." :
+     et == 1 ? "HOW (touch entry, fresh zone, purity 4): set a " + side + " limit at " + str.tostring(near, format.mintick) + ", " + stop + ". It fills the moment price comes back. Only take it on a zone that scores well." :
+     et == 2 ? "HOW (zone entry, touched once under half way, with the trend): no limit order. Wait for a " + tf + " candle to close inside the zone, then " + side + " inside it (limit or market), " + stop + ". No close inside, no trade." :
+     "HOW (exit entry, purity " + str.tostring(pur) + (s_trend == 0 ? ", counter trend" : "") + "): do not " + side + " the touch. Let price go into the zone and turn, then " + side + " when a " + tf + " candle closes back " + (is_supply ? "below " : "above ") + str.tostring(near, format.mintick) + ", " + stop + "."
+
 // 9 EMA exit (Best Loser Wins: let the winner run). Replays the chart candles since the zone's first retest:
 // entry at the near edge, stop at the far edge. On the entry candle only its close counts in our favour, because its
 // extreme most likely printed before price reached the zone. Once a candle reaches +1R the stop moves to breakeven
@@ -1064,7 +1125,7 @@ ema_conf(Zone z, bool is_supply) =>
 // fast EMA and closed after the +1R candle. Only trades the standing EMA signal agreed with when Require EMA
 // Agreement is on. Returns [state, label line, bars back to the entry, bars back to the +1R candle, bars back to the
 // end, R at the end]. state: 0 no trade, 1 open, 2 stop at breakeven, 3 9 EMA exit, 4 stopped, 5 breakeven stop.
-trade_walk(Zone z, bool is_supply) =>
+trade_walk(Zone z, bool is_supply, int et) =>
     int state = 0
     string txt = ""
     int n = -1
@@ -1073,20 +1134,25 @@ trade_walk(Zone z, bool is_supply) =>
     float r_end = na
     float top = z.b.get_top()
     float btm = z.b.get_bottom()
-    float near = is_supply ? btm : top
     float far = is_supply ? top : btm
-    float risk = top - btm
     int d = is_supply ? -1 : 1
-    if show_exit and not na(z.e_t) and risk > 0
+    // entry: Touch at the near edge on the first retest, Zone at the close of the first candle inside, Exit at the
+    // close of the candle back out. The latter two enter at a close, so their walk starts on the candle after
+    int t0 = et == 1 ? z.e_t : et == 2 ? z.zc_t : z.x_t
+    float near = et == 1 ? (is_supply ? btm : top) : et == 2 ? z.zc_px : z.x_px
+    float risk = na(near) ? na : (near - far) * d
+    if show_exit and not na(t0) and risk > 0
         for k = 0 to 498
-            if time[k] < z.e_t
+            if time[k] < t0
                 break
             n := k
-        if n >= 0 and time[n + 1] < z.e_t and (not ema_required or ema_sig[n] == d)
+        if n >= 0 and time[n + 1] < t0 and (not ema_required or ema_sig[n] == d)
             state := 1
             int t1r = na
-            for k = n to 0
-                float fav = n == k ? math.max((close[k] - near) * d, 0.0) / risk : (d == 1 ? high[k] - near : near - low[k]) / risk
+            for k = (et == 1 ? n : n - 1) to 0
+                if k < 0
+                    break
+                float fav = et == 1 and n == k ? math.max((close[k] - near) * d, 0.0) / risk : (d == 1 ? high[k] - near : near - low[k]) / risk
                 float adv = (d == 1 ? low[k] - near : near - high[k]) / risk
                 if state == 1 and adv <= -1
                     state := 4
@@ -1109,7 +1175,7 @@ trade_walk(Zone z, bool is_supply) =>
                     t1r := time_close[k]
             string ema_nm = str.tostring(ema_fast_len) + " EMA"
             string cross = tf_name(TF0) + " close " + (is_supply ? "above" : "below") + " the " + ema_nm
-            txt := state == 1 ? "TRADE: in at " + str.tostring(near, format.mintick) + ", stop " + str.tostring(far, format.mintick) + " | at +1R (" + str.tostring(near + d * risk, format.mintick) + ") stop to breakeven, then exit on a " + cross :
+            txt := state == 1 ? "TRADE (" + entry_name(et) + "): in at " + str.tostring(near, format.mintick) + ", stop " + str.tostring(far, format.mintick) + " | at +1R (" + str.tostring(near + d * risk, format.mintick) + ") stop to breakeven, then exit on a " + cross :
                  state == 2 ? "TRADE: stop at breakeven " + str.tostring(near, format.mintick) + " | exit on the first " + cross :
                  state == 3 ? "TRADE DONE: " + ema_nm + " exit at " + str.tostring(close[ke], format.mintick) + " (" + (r_end >= 0 ? "+" : "") + str.tostring(r_end, "#.#") + "R)" :
                  state == 4 ? "TRADE DONE: stopped out (-1R)" : "TRADE DONE: breakeven stop (0R)"
@@ -1142,7 +1208,7 @@ mid_touch_zone(array<Zone> mids, array<Zone> lows, bool is_supply) =>
                 if not inner
                     bool live = z.inside
                     if not live
-                        [st, tx, n0, k1, ke, re] = trade_walk(z, is_supply)
+                        [st, tx, n0, k1, ke, re] = trade_walk(z, is_supply, 1)
                         live := st == 1 or st == 2
                     if live and (na(best) or z.e_t > best.e_t)
                         best := z
@@ -1244,7 +1310,11 @@ score_zone(Zone z, bool is_supply, float r_top, float r_btm, box opp, string opp
     float ratio = na(z.ext) or hgt <= 0 ? na : (is_supply ? btm - z.ext : z.ext - top) / hgt
     int s_move = not na(ratio) and ratio >= 2 ? 2 : 0
     int s_os = z.os ? 2 : 0
-    int s_pur = z.touches == 0 ? 4 : (z.touches == 1 and z.depth < 0.5 ? 2 : 0)
+    // purity of the visit being traded: during a visit, the visits before it (a fresh zone being touched is still 4).
+    // Just after a candle closes back out, the visit stays the one being traded only when it calls for an Exit entry
+    int p_last = purity_of(z, true)
+    bool live = z.inside or (z.touches > 0 and not na(z.x_t) and visit_live(z) and entry_type(p_last, s_trend) == 3 and not used_up(z))
+    int s_pur = live ? p_last : purity_of(z, false)
     float rrr = na
     if not na(opp) and hgt > 0
         float entry = is_supply ? btm : top
@@ -1256,17 +1326,21 @@ score_zone(Zone z, bool is_supply, float r_top, float r_btm, box opp, string opp
     int total = s_range + s_time + s_trend + s_move + s_os + s_pur + s_rrr
     [total, s_range, s_time, s_trend, s_move, s_os, s_pur, s_rrr, rrr, ratio, pos, opp_nm, split]
 
-// Entry timing, the sheet's rule: a trade is only taken on the retest of the zone, except when the impulse gapped away
-// from the base, which allows an entry before any retest. A go needs the score as well.
+// Entry timing, by entry type (see ENTRY TYPES). A Touch entry is taken on the retest, or before any retest when the
+// impulse gapped away from the base. A Zone entry needs a candle of the zone's timeframe to have closed inside the zone
+// on this visit. An Exit entry is live on the candle after the one that closed back out. A go needs the score as well.
 // ema_n: 1 when the standing EMA signal points the zone's way (see ema_conf). With Require EMA Agreement on,
 // a zone whose timing is right but whose EMA signal is not with it waits for the EMA
-entry_state(Zone z, int total, int ema_n, int slot) =>
+entry_state(Zone z, int total, int ema_n, int slot, int et) =>
     bool valid = total >= alert_min
-    bool timing = z.inside or (z.gap_out and z.touches == 0)
+    string tf = tf_name(slot == 0 ? TF0 : slot == 1 ? TF1 : TF2)
+    bool timing = et == 0 ? false : et == 1 ? (z.inside or (z.gap_out and z.touches == 0)) : et == 2 ? (z.inside and not na(z.zc_t)) : (not z.inside and visit_live(z))
     bool ema_ok = not ema_required or ema_n == 1
     bool go = valid and timing and ema_ok
-    string why = slot == 1 and z.inside ? tf_name(TF1) + " first touch, no " + tf_name(TF0) + " zone inside" : z.inside ? "retest now" : "gap away, no retest needed"
-    string st = not valid ? "NO (score under " + str.tostring(alert_min) + ")" : not timing ? "WAIT FOR RETEST" : not ema_ok ? "WAIT FOR EMA (" + why + ", EMA not with the zone)" : "GO (" + why + ")"
+    string why = et == 2 ? "zone entry, a " + tf + " candle closed inside" : et == 3 ? "exit entry, a " + tf + " candle closed back out" :
+         slot == 1 and z.inside ? "touch entry, " + tf_name(TF1) + " first touch, no " + tf_name(TF0) + " zone inside" : z.inside ? "touch entry, retest now" : "gap away, no retest needed"
+    string wait = et == 1 ? "WAIT FOR RETEST (touch entry)" : et == 2 ? (z.inside ? "WAIT FOR A " + tf + " CLOSE INSIDE (zone entry)" : "WAIT FOR PRICE (zone entry)") : (z.inside ? "WAIT FOR A " + tf + " CLOSE BACK OUT (exit entry)" : "WAIT FOR PRICE TO GO IN AND TURN (exit entry)")
+    string st = et == 0 ? "NO (one and done: this " + tf + " zone has had its touch)" : not valid ? "NO (score under " + str.tostring(alert_min) + ")" : not timing ? wait : not ema_ok ? "WAIT FOR EMA (" + why + ", EMA not with the zone)" : "GO (" + why + ")"
     [go, st]
 
 score_line(int total, int s_range, int s_time, int s_trend, int s_move, int s_os, int s_pur, int s_rrr, float rrr, float ratio, float pos, string opp_nm, float r_top, float r_btm, string r_top_nm, string r_btm_nm, bool split) =>
@@ -1339,13 +1413,17 @@ if barstate.islast
                 opp_nm := ""
         [tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, spl] = score_zone(tgt_sup, true, r_top, r_btm, opp, opp_nm)
         [s_en, s_et] = ema_conf(tgt_sup, true)
-        [s_go, s_ent] = entry_state(tgt_sup, tot, s_en, tgt_sup_slot)
-        [s_tr, s_trt, s_n, s_k1, s_ke, s_re] = trade_walk(tgt_sup, true)
+        int s_typ = used_up(tgt_sup) ? 0 : entry_type(a6, a3)
+        // the trade on the latest visit keeps the type that visit had
+        int s_typ_last = tgt_sup.touches == 0 ? 1 : entry_type(purity_of(tgt_sup, true), a3)
+        [s_go, s_ent] = entry_state(tgt_sup, tot, s_en, tgt_sup_slot, s_typ)
+        [s_tr, s_trt, s_n, s_k1, s_ke, s_re] = trade_walk(tgt_sup, true, s_typ_last)
+        string s_how = show_hint and (s_tr == 0 or s_tr >= 3) ? "\n" + entry_hint(tgt_sup, true, s_typ, a6, a3) : ""
         trade_marks(true, s_tr, s_k1, s_ke, s_re)
         be_now := be_now or (s_tr == 2 and s_tr_prev == 1)
         exit_now := exit_now or (s_tr >= 3 and s_tr_prev >= 1 and s_tr_prev <= 2)
         s_tr_prev := s_tr
-        mark_target(tgt_sup_slot, true, tgt_sup, tgt_sup_tag, (show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, r_top, r_btm, r_top_nm, r_btm_nm, spl) + "\n" : "") + s_et + (s_trt != "" ? "\n" + s_trt : ""), s_ent, s_go)
+        mark_target(tgt_sup_slot, true, tgt_sup, tgt_sup_tag, (show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, r_top, r_btm, r_top_nm, r_btm_nm, spl) + "\n" : "") + s_et + (s_trt != "" ? "\n" + s_trt : "") + s_how, s_ent, s_go)
         s_json := setup_json(tgt_sup, true, tgt_sup_slot, tgt_sup_tag, tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, s_go, s_ent, s_en)
     if not na(tgt_dem)
         box opp = na
@@ -1362,13 +1440,17 @@ if barstate.islast
                 opp_nm := ""
         [tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, spl] = score_zone(tgt_dem, false, r_top, r_btm, opp, opp_nm)
         [d_en, d_et] = ema_conf(tgt_dem, false)
-        [d_go, d_ent] = entry_state(tgt_dem, tot, d_en, tgt_dem_slot)
-        [d_tr, d_trt, d_n, d_k1, d_ke, d_re] = trade_walk(tgt_dem, false)
+        int d_typ = used_up(tgt_dem) ? 0 : entry_type(a6, a3)
+        // the trade on the latest visit keeps the type that visit had
+        int d_typ_last = tgt_dem.touches == 0 ? 1 : entry_type(purity_of(tgt_dem, true), a3)
+        [d_go, d_ent] = entry_state(tgt_dem, tot, d_en, tgt_dem_slot, d_typ)
+        [d_tr, d_trt, d_n, d_k1, d_ke, d_re] = trade_walk(tgt_dem, false, d_typ_last)
+        string d_how = show_hint and (d_tr == 0 or d_tr >= 3) ? "\n" + entry_hint(tgt_dem, false, d_typ, a6, a3) : ""
         trade_marks(false, d_tr, d_k1, d_ke, d_re)
         be_now := be_now or (d_tr == 2 and d_tr_prev == 1)
         exit_now := exit_now or (d_tr >= 3 and d_tr_prev >= 1 and d_tr_prev <= 2)
         d_tr_prev := d_tr
-        mark_target(tgt_dem_slot, false, tgt_dem, tgt_dem_tag, (show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, r_top, r_btm, r_top_nm, r_btm_nm, spl) + "\n" : "") + d_et + (d_trt != "" ? "\n" + d_trt : ""), d_ent, d_go)
+        mark_target(tgt_dem_slot, false, tgt_dem, tgt_dem_tag, (show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, r_top, r_btm, r_top_nm, r_btm_nm, spl) + "\n" : "") + d_et + (d_trt != "" ? "\n" + d_trt : "") + d_how, d_ent, d_go)
         d_json := setup_json(tgt_dem, false, tgt_dem_slot, tgt_dem_tag, tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, d_go, d_ent, d_en)
     if not na(tgt_sup) and not na(tgt_dem)
         float s_edge = tgt_sup.b.get_bottom()

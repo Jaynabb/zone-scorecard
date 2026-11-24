@@ -643,7 +643,7 @@ monitor(array<Zone> zones, bool is_supply, int slot, float c, float h, float l) 
 // A zone confirmed late (its follow-through departed only some candles after the impulse) did not exist while those
 // candles printed, so retests among them went uncounted and the zone read as fresh. On its first bar, replay the
 // chart bars since the impulse candle closed through the same per-candle check, oldest first.
-catch_up(array<Zone> zones, bool is_supply, int slot, float c, float h, float l) =>
+catch_up(array<Zone> zones, bool is_supply, int slot, float c, float h, float l, bool htf, bool tfn) =>
     if zones.size() > 0
         int tf_ms = timeframe.in_seconds(slot == 0 ? TF0 : slot == 1 ? TF1 : TF2) * 1000
         for i = zones.size() - 1 to 0
@@ -659,8 +659,9 @@ catch_up(array<Zone> zones, bool is_supply, int slot, float c, float h, float l)
                         n := q
                     if n > 0
                         for q = n to 1
-                            if not na(c[q])
-                                res := step(z, is_supply, slot, c[q], h[q], l[q], time[q])
+                            // a higher timeframe zone is stepped once per finished candle, the way monitor does it
+                            if htf ? (tfn[q] and not na(c[q + 1]) and time[q + 1] >= z.it + tf_ms) : not na(c[q])
+                                res := htf ? step(z, is_supply, slot, c[q + 1], h[q + 1], l[q + 1], time[q]) : step(z, is_supply, slot, c[q], h[q], l[q], time[q])
                                 if res > 0
                                     break
                 if res > 0
@@ -800,11 +801,13 @@ process_slot(int slot, int mode, bool show, array<Zone> sup, array<Zone> dem, bo
         else
             add_once(sup, true, slot, h_sf, h_st, h_sb, h_stm, h_sn, h_si, h_a, h_sg, h_so, h_sm)
             add_once(dem, false, slot, h_df, h_dt, h_db, h_dtm, h_dn, h_di, h_a, h_dg, h_do, h_dm)
-            catch_up(sup, true, slot, h_c, h_h, h_l)
-            catch_up(dem, false, slot, h_c, h_h, h_l)
-            // On live bars a higher timeframe candle is still forming, so its close would kill a zone that history
-            // (which only sees finished candles) keeps. Live, a zone is judged once that candle has closed
-            if not (barstate.isrealtime and mode == 1)
+            catch_up(sup, true, slot, h_c, h_h, h_l, mode == 1, tf_new)
+            catch_up(dem, false, slot, h_c, h_h, h_l, mode == 1, tf_new)
+            // A higher timeframe zone is judged once per finished candle of its timeframe, on the chart bar a new one
+            // starts. Live, the candle is still forming and its close would kill a zone history keeps; on history
+            // every chart bar inside the period repeats the last finished candle, so judging each bar counted a wick
+            // that touched and closed outside as a new retest on every chart bar
+            if mode == 0
                 monitor(sup, true, slot, h_c, h_h, h_l)
                 monitor(dem, false, slot, h_c, h_h, h_l)
             else if tf_new

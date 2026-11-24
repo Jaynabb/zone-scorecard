@@ -208,6 +208,7 @@ detect(bool is_supply, int k, float yard) =>
     int t_t0 = na
     int t_t1 = na
     float t_ext = na
+    int legs = 0
     float body = math.abs(close[k] - open[k])
     bool away = is_supply ? close[k] < open[k] : close[k] > open[k]
     // a gap between this candle and the one before it is part of the impulse: price left the base without trading
@@ -233,8 +234,15 @@ detect(bool is_supply, int k, float yard) =>
         float a_hi = na
         float w_lo = na   // running wick extremes of the base
         float w_hi = na
-        for j = 1 to base_max
+        for j = 1 to base_max + 4
+            if cnt >= base_max
+                break
             int off = k + j
+            // a candle between the base and the impulse that moves the impulse's way and closes beyond the candle
+            // before it (above its high for demand, below its low for supply) is the start of the move, not the base
+            if cnt == 0 and legs < 4 and (is_supply ? close[off] < open[off] and close[off] < low[off + 1] : close[off] > open[off] and close[off] > high[off + 1])
+                legs += 1
+                continue
             float bd = math.abs(close[off] - open[off])
             float bh = math.max(open[off], close[off])
             float bl = math.min(open[off], close[off])
@@ -243,7 +251,7 @@ detect(bool is_supply, int k, float yard) =>
             float rg = high[off] - low[off]
             bool balance = rg > 0 and bd <= rg * 0.5 and bd <= drive
             // the candle a gap left behind is the base whatever its size: the gap itself is the proof of imbalance
-            if na(bd) or (bd > base_lim and not (j == 1 and gap_imp) and not balance)
+            if na(bd) or (bd > base_lim and not (j == 1 + legs and gap_imp) and not balance)
                 break
             // a true gap between two base candles ends the base: only the candles on the impulse side of the gap are
             // the zone (gap refined), as the sheet draws it. A true gap is the later candle opening beyond the earlier
@@ -268,7 +276,7 @@ detect(bool is_supply, int k, float yard) =>
         // least as big as it. A candle bigger than the impulse is a drive, not a base. This is how the sheet
         // draws a one candle base at a V low or V high.
         if cnt == 0
-            int off = k + 1
+            int off = k + 1 + legs
             bool holds_extreme = is_supply ? high[off] >= high[k] : low[off] <= low[k]
             bool normal_size = gap_imp or math.abs(close[off] - open[off]) <= drive
             if not na(close[off]) and holds_extreme and normal_size
@@ -283,7 +291,10 @@ detect(bool is_supply, int k, float yard) =>
             t_t0 := na(time[k + 2]) ? time[k + 1] : time[k + 2]
             t_t1 := time_close[k]
             t_ext := is_supply ? math.max(high[k], nz(high[k + 1], high[k])) : math.min(low[k], nz(low[k + 1], low[k]))
-    [found, z_top, z_btm, lt, cnt, time[k], turn, t_t0, t_t1, t_ext, gap_cut, gap_full and found]
+    // leg candles were set aside and more than one candle is left: which one is the base is unclear at this timeframe,
+    // so the timeframe below is asked (see resolve_turns)
+    bool amb = found and legs > 0 and cnt > 1
+    [found, z_top, z_btm, lt, cnt, time[k], turn, t_t0, t_t1, t_ext, gap_cut, gap_full and found, amb]
 
 // True when price travelled at least dep_mult x zone height beyond the zone edge over the k closed candles starting at the impulse.
 // Also returns the furthest price reached, so the move score counts the follow-through that came before the zone was drawn.
@@ -303,10 +314,10 @@ departs(bool is_supply, int k, float top, float btm, float yard) =>
 // One candidate per side per bar: an impulse that closed last bar and already departed far enough,
 // otherwise an impulse up to dep_bars ago whose follow-through departed far enough on the last closed candle.
 candidate(bool is_supply, float yard) =>
-    [f1, t1, b1, l1, n1, i1, tn1, a1, c1, x1, g1, o1] = detect(is_supply, 1, yard)
+    [f1, t1, b1, l1, n1, i1, tn1, a1, c1, x1, g1, o1, am1] = detect(is_supply, 1, yard)
     [dep1, mx1] = departs(is_supply, 1, t1, b1, yard)
     bool ok1 = f1 and (not use_departure or dep1)
-    [f2, t2, b2, l2, n2, i2, tn2, a2, c2, x2, g2, o2] = detect(is_supply, dep_bars, yard)
+    [f2, t2, b2, l2, n2, i2, tn2, a2, c2, x2, g2, o2, am2] = detect(is_supply, dep_bars, yard)
     float mx2 = na
     bool ok2 = false
     // otherwise the zone appears on the candle its follow-through completes the departure: an impulse k candles back
@@ -314,7 +325,7 @@ candidate(bool is_supply, float yard) =>
     // showed a zone late, after its first retests had already printed
     if use_departure
         for k = 2 to dep_bars
-            [fk, tk, bk, lk, nk, ik, tnk, ak, ck, xk, gk, ok_] = detect(is_supply, k, yard)
+            [fk, tk, bk, lk, nk, ik, tnk, ak, ck, xk, gk, ok_, amk] = detect(is_supply, k, yard)
             if fk
                 [depk, mxk] = departs(is_supply, k, tk, bk, yard)
                 float need = (tk - bk) * dep_mult
@@ -339,6 +350,7 @@ candidate(bool is_supply, float yard) =>
                     i2 := ik
                     g2 := gk
                     o2 := ok_
+                    am2 := amk
                     mx2 := mxk
                     break
     else
@@ -363,6 +375,13 @@ candidate(bool is_supply, float yard) =>
     int tt0 = td1 ? a1 : a2
     int tt1 = td1 ? c1 : c2
     float tx = td1 ? x1 : x2
+    // an unclear base (leg candles set aside, several candles left) is drawn now and also sent to the timeframe below,
+    // which refines it to the base it finds at the extreme between the base's first candle and the impulse
+    if found and (ok1 ? am1 : am2)
+        turn := true
+        tt0 := lt
+        tt1 := it
+        tx := is_supply ? top : btm
     [found, top, btm, lt, n, it, turn, tt0, tt1, tx, gp, go, mx]
 
 // Everything a timeframe reports each bar.
@@ -698,6 +717,32 @@ resolve_turns(int slot, bool is_supply, array<Zone> zones, float yard_h, float t
                                 if is_supply ? tf_close[q] > lb.get_top() : tf_close[q] < lb.get_bottom()
                                     dead := true
                                     break
+                        // an unclear base drawn from this timeframe (same first candle) is refined in place
+                        Zone own = na
+                        if in_window and at_extreme and not dead and zones.size() > 0
+                            for q = 0 to zones.size() - 1
+                                if zones.get(q).lt == t0
+                                    own := zones.get(q)
+                                    break
+                        if not na(own)
+                            own.b.set_top(lb.get_top())
+                            own.b.set_bottom(lb.get_bottom())
+                            own.via_lower := true
+                            own.chk := far
+                            // retests were counted against the wider box: count them again against the refined one
+                            own.touches := 0
+                            own.depth := 0.0
+                            own.d_prev := 0.0
+                            own.inside := false
+                            own.e_t := na
+                            own.zc_t := na
+                            own.zc_px := na
+                            own.x_t := na
+                            own.x_px := na
+                            own.retired := false
+                            own.fresh := true
+                            done := true
+                            break
                         if in_window and at_extreme and not dead
                             int before = zones.size()
                             create_zone(zones, is_supply, lb.get_top(), lb.get_bottom(), lz.lt, slot, yard_h, lz.base_n, t1, lz.gap, lz.gap_out, true, na)

@@ -51,7 +51,7 @@ float dep_mult = input.float(1.0, 'Departure (x zone height)', minval=0.25, step
 int dep_bars = input.int(8, 'Departure Within (candles)', minval=1, maxval=20, group=filt_group, tooltip='A zone appears as soon as the impulse candle alone has departed this far, otherwise once the follow-through has, checked this many candles after the impulse.')
 float max_height_mult = input.float(0.0, 'Max Zone Height (x typical body)', minval=0.0, step=0.5, group=filt_group, tooltip='0 = off (default): every zone is drawn however tall, and the score judges it. Set a number to skip zones taller than that many typical bodies of their own timeframe.')
 int max_touches = input.int(0, 'Remove Zone After N Touches', minval=0, group=filt_group, tooltip='A retest is price coming back into the zone after a candle closed back outside it. 0 = never remove by retests; purity is scored on the sheet instead.')
-bool one_done = input.bool(true, 'One And Done Under 1 Hour', group=filt_group, tooltip='Zones of a timeframe under 1 hour are tradable once: the zone is removed when price comes back for a second touch. Your mentor\'s rule; on 5m backtests the first touch was the best one.')
+bool one_done = input.bool(true, 'One And Done Under 1 Hour', group=filt_group, tooltip='Zones of a timeframe under 1 hour are tradable once: after price comes back for a second touch the zone is no longer a target. It stays drawn faint (Show All Valid Zones) until price closes through it. Your mentor\'s rule; on 5m backtests the first touch was the best one.')
 bool corr_only = input.bool(false, 'Hide Higher Timeframe Zones Without Correlation', group=filt_group, tooltip='Off: higher timeframe zones are drawn as hollow frames wherever they are, which shows where price is heading. On: they are drawn only where they overlap a chart timeframe zone of the same side. Zones from lower timeframes are never drawn either way.')
 int show_n = input.int(3, 'Show Nearest Zones Per Side', minval=1, maxval=20, group=filt_group, tooltip='Per timeframe: draw only this many supply zones above price and demand zones below price. The rest stay in memory and appear when price moves toward them.')
 
@@ -113,6 +113,7 @@ bool label_targets_only = input.bool(true, 'Label Only The Target Zones', group=
 bool mid_entry = input.bool(true, 'Enter On First Mid TF Touch', group=filt_group, tooltip="When price makes its first touch of a Mid timeframe zone and no Low timeframe zone of the same side sits inside it yet, that Mid zone becomes the target and the touch is the entry (stop past its far edge). Waiting for a Low timeframe zone to form from the bounce and get retested mostly missed the move. Backtested 2026-11-23: Daily inside Weekly +0.20R per trade entering on the Weekly touch against -0.06R waiting; 1H in 4H and 5m in 30m pointed the same way. The score and EMA rules still apply.")
 bool show_hint = input.bool(true, 'Show How To Take The Trade', group=visual_group, tooltip="Adds a HOW line to each target label: which of the course's three entries the zone calls for and the steps to take it. TOUCH (purity 4, fresh zone): limit order at the near edge. ZONE (purity 2, with the Mid trend): wait for a candle to close inside the zone, then enter inside it. EXIT (purity 0, or counter trend): let price go in and turn, enter when a candle closes back out. Stop past the far edge in all three.")
 int scalp_min = input.int(16, 'Valid Setup Score When Low TF Under 1 Hour', minval=0, maxval=20, group=scan_group, tooltip='Used instead of Valid Setup Score when the Low timeframe is under 1 hour (Scalping). With One And Done on, every tradable zone there is fresh and scores the full 4 for purity, so purity no longer separates setups; the higher bar makes the other checks earn it.')
+bool show_all = input.bool(true, 'Show All Valid Zones', group=visual_group, tooltip='Every zone price has not closed through stays on the chart. The nearest ones per side are drawn in full (Show Nearest Zones Per Side); the rest are drawn faint with a dashed outline, including zones past their touch limit (One And Done), which are never targets. So when price comes back to old supply or demand it is already marked.')
 // the score a GO needs: higher when the Low timeframe is under 1 hour (see scalp_min)
 int go_min = timeframe.in_seconds(TF0) < 3600 ? scalp_min : alert_min
 // EMA agreement only gates a GO when the Low timeframe is under 1 hour. Backtested 2026-11-23 on first touches of fresh
@@ -142,6 +143,7 @@ type Zone
     float zc_px = na      // ... and its close
     int x_t = na          // latest visit: chart bar time of the candle that closed back out past the near edge (Exit entry)
     float x_px = na       // ... and its close
+    bool retired = false  // past its touch limit (One And Done or Remove After N Touches): still valid supply or demand, drawn faint, never a target
     int it = na           // open time of the impulse candle (the candles after it are where retests can start)
     bool fresh = true     // just created: the candles between its impulse and now have not been checked for retests yet
     float chk = na        // drill-down only: the furthest close of this timeframe seen between the base and the turn (for checking the rule)
@@ -454,9 +456,16 @@ mark_target(int slot, bool is_supply, Zone z, string tag, string extra, string s
     label l = label.new(bar_index + 6, mid, zone_text(slot, is_supply, z, tag, extra, status), xloc=xloc.bar_index, style=label.style_label_left, color=go ? go_color : highlight_color, textcolor=color.black, size=size.small)
     tgt_labels.push(l)
 
+// When the list is full, forget a retired zone first (oldest first), and only then the oldest zone, so old supply and
+// demand price never came back to stays on the chart as long as possible
 method trim(array<Zone> zones, int limit) =>
     while zones.size() > limit
-        Zone z = zones.pop()
+        int drop = zones.size() - 1
+        for i = zones.size() - 1 to 0
+            if zones.get(i).retired
+                drop := i
+                break
+        Zone z = zones.remove(drop)
         z.b.delete()
 
 // true when the new price range touches an existing untested zone of the same timeframe and side.
@@ -530,7 +539,7 @@ create_zone(array<Zone> zones, bool is_supply, float z_top, float z_btm, int lef
 // Retest: price comes back into the zone after a candle closed back outside it. Consecutive candles inside the zone
 // are one visit. A candle that wicks in and closes outside ends the visit, so the next entry is a new retest.
 // One candle of the zone's own timeframe against one zone. t is the chart bar time the candle is stamped with.
-// Returns 0 keep, 1 broken (a close through the wick edge), 2 retired (past its touch limit).
+// Returns 0 keep, 1 broken (a close through the wick edge). Past its touch limit a zone is marked retired.
 step(Zone z, bool is_supply, int slot, float c, float h, float l, int t) =>
     int res = 0
     box b = z.b
@@ -574,8 +583,10 @@ step(Zone z, bool is_supply, int slot, float c, float h, float l, int t) =>
                 z.depth := math.max(z.depth, math.min(math.max(pen, 0.0), 1.0))
         z.inside := touching and not closed_out
         int tlim = one_done and timeframe.in_seconds(slot == 0 ? TF0 : slot == 1 ? TF1 : TF2) < 3600 ? 1 : max_touches
+        // past the touch limit the zone is no longer tradable, but price has not closed through it, so it stays on the
+        // chart as a faint reference
         if tlim > 0 and z.touches > tlim
-            res := 2
+            z.retired := true
     res
 
 monitor(array<Zone> zones, bool is_supply, int slot, float c, float h, float l) =>
@@ -767,7 +778,7 @@ method hide_all(array<Zone> zones, bool is_supply, int slot) =>
             b.set_border_color(color.new(base, 100))
             b.set_text("")
 
-// Draw only the nearest show_n zones on this side. Hide the rest. White outline on the closest one if asked.
+// Draw the nearest show_n zones on this side in full, the rest faint (Show All Valid Zones). White outline on the closest one if asked.
 // With use_filter, a zone is eligible only if it overlaps one of the anchor boxes (the visible chart timeframe zones).
 // Returns the boxes that ended up visible.
 refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<box> anchors, bool use_filter) =>
@@ -777,10 +788,14 @@ refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<bo
     int n = zones.size()
     if n > 0
         array<float> dist = array.new<float>(n, na)
+        array<bool> shown_flag = array.new<bool>(n, false)
         for i = 0 to n - 1
             box b = zones.get(i).b
             float d = is_supply ? (b.get_bottom() > close ? b.get_bottom() - close : (b.get_top() >= close ? 0.0 : na)) : (b.get_top() < close ? close - b.get_top() : (b.get_bottom() <= close ? 0.0 : na))
             if use_filter and not anchors.overlaps_any(b.get_top(), b.get_bottom())
+                d := na
+            // a retired zone is never one of the nearest (it is not tradable); it is drawn faint below
+            if zones.get(i).retired
                 d := na
             dist.set(i, d)
             b.set_bgcolor(color.new(base, 100))
@@ -818,7 +833,21 @@ refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<bo
                 b.set_border_width(w)
             dist.set(best, na)
             shown_boxes.push(b)
+            shown_flag.set(best, true)
             shown += 1
+        // every other zone that price has not closed through is drawn faint, so a supply or demand that price left long
+        // ago is on the chart when price comes back to it
+        if show_all
+            for i = 0 to n - 1
+                Zone z = zones.get(i)
+                box b = z.b
+                if not shown_flag.get(i) and not (use_filter and not anchors.overlaps_any(b.get_top(), b.get_bottom()))
+                    b.set_bgcolor(color.new(base, 92))
+                    b.set_border_color(color.new(base, 55))
+                    b.set_border_width(1)
+                    b.set_border_style(line.style_dashed)
+                    string nm2 = nm + (is_supply ? " SUPPLY" : " DEMAND")
+                    b.set_text(show_zone_info ? nm2 + " " + str.tostring(b.get_bottom(), format.mintick) + " - " + str.tostring(b.get_top(), format.mintick) + " | touches " + str.tostring(z.touches) + (z.retired ? " | no trade" : "") : "")
     shown_boxes
 
 // The nearest zone of one side: the closest box above price for supply, below price for demand (a box that
@@ -1280,7 +1309,7 @@ mid_touch_zone(array<Zone> mids, array<Zone> lows, bool is_supply) =>
                 if lows.size() > 0
                     for j = 0 to lows.size() - 1
                         Zone lz = lows.get(j)
-                        if lz.lt < z.e_t and lz.b.get_top() >= z.b.get_bottom() and lz.b.get_bottom() <= z.b.get_top()
+                        if not lz.retired and lz.lt < z.e_t and lz.b.get_top() >= z.b.get_bottom() and lz.b.get_bottom() <= z.b.get_top()
                             inner := true
                             break
                 // price past the far edge has hit the stop of the trade taken on the touch, even while the Mid candle that

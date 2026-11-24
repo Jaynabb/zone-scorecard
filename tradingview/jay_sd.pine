@@ -1197,8 +1197,8 @@ trade_marks(bool is_supply, int state, int k1, int ke, float r_end) =>
         tgt_labels.push(label.new(bar_index - ke, is_supply ? high[ke] : low[ke], t, style=is_supply ? label.style_label_down : label.style_label_up, color=color.new(color.white, 100), textcolor=state == 3 and r_end > 0 ? color.new(#2ECC71, 0) : color.new(#FF6B6B, 0), size=size.small))
 
 // Mid timeframe zone on its first touch with no Low timeframe zone of the same side inside it from before the touch
-// (a Low zone born from the bounce does not count). It qualifies while price is in it, and afterwards while the trade
-// taken on that touch is still open, so the 9 EMA exit keeps managing it. The most recent such touch wins.
+// (a Low zone born from the bounce does not count). It qualifies while price is in it (not past its far edge), and
+// afterwards while the trade taken on that touch is still open, so the 9 EMA exit keeps managing it. The most recent such touch wins.
 mid_touch_zone(array<Zone> mids, array<Zone> lows, bool is_supply) =>
     Zone best = na
     if mid_entry and mids.size() > 0
@@ -1212,7 +1212,10 @@ mid_touch_zone(array<Zone> mids, array<Zone> lows, bool is_supply) =>
                         if lz.lt < z.e_t and lz.b.get_top() >= z.b.get_bottom() and lz.b.get_bottom() <= z.b.get_top()
                             inner := true
                             break
-                if not inner
+                // price past the far edge has hit the stop of the trade taken on the touch, even while the Mid candle that
+                // would break the zone is still open, so the zone is no longer the entry
+                bool beyond = is_supply ? close >= z.b.get_top() : close <= z.b.get_bottom()
+                if not inner and not beyond
                     bool live = z.inside
                     if not live
                         [st, tx, n0, k1, ke, re] = trade_walk(z, is_supply, 1)
@@ -1227,6 +1230,8 @@ take_mid_target(Zone low_tgt, Zone mid_z, bool is_supply) =>
         [w, tr, nm] = zone_style(0)
         low_tgt.b.set_border_color(zone_color(0, is_supply))
         low_tgt.b.set_border_width(w)
+    // refresh may have hidden it (only zones on price's side get drawn), so it gets the target fill as well
+    mid_z.b.set_bgcolor(color.new(zone_color(1, is_supply), target_tr))
     mid_z.b.set_border_color(highlight_color)
     mid_z.b.set_border_width(3)
 

@@ -112,6 +112,9 @@ bool label_targets_only = input.bool(true, 'Label Only The Target Zones', group=
 // added last so earlier inputs keep their ids and existing chart settings stay put
 bool mid_entry = input.bool(true, 'Enter On First Mid TF Touch', group=filt_group, tooltip="When price makes its first touch of a Mid timeframe zone and no Low timeframe zone of the same side sits inside it yet, that Mid zone becomes the target and the touch is the entry (stop past its far edge). Waiting for a Low timeframe zone to form from the bounce and get retested mostly missed the move. Backtested 2026-11-23: Daily inside Weekly +0.20R per trade entering on the Weekly touch against -0.06R waiting; 1H in 4H and 5m in 30m pointed the same way. The score and EMA rules still apply.")
 bool show_hint = input.bool(true, 'Show How To Take The Trade', group=visual_group, tooltip="Adds a HOW line to each target label: which of the course's three entries the zone calls for and the steps to take it. TOUCH (purity 4, fresh zone): limit order at the near edge. ZONE (purity 2, with the Mid trend): wait for a candle to close inside the zone, then enter inside it. EXIT (purity 0, or counter trend): let price go in and turn, enter when a candle closes back out. Stop past the far edge in all three.")
+int scalp_min = input.int(16, 'Valid Setup Score When Low TF Under 1 Hour', minval=0, maxval=20, group=scan_group, tooltip='Used instead of Valid Setup Score when the Low timeframe is under 1 hour (Scalping). With One And Done on, every tradable zone there is fresh and scores the full 4 for purity, so purity no longer separates setups; the higher bar makes the other checks earn it.')
+// the score a GO needs: higher when the Low timeframe is under 1 hour (see scalp_min)
+int go_min = timeframe.in_seconds(TF0) < 3600 ? scalp_min : alert_min
 
 //-----------------------------------------------------------------------------
 // TYPES, ARRAYS & GLOBALS
@@ -1332,7 +1335,7 @@ score_zone(Zone z, bool is_supply, float r_top, float r_btm, box opp, string opp
 // ema_n: 1 when the standing EMA signal points the zone's way (see ema_conf). With Require EMA Agreement on,
 // a zone whose timing is right but whose EMA signal is not with it waits for the EMA
 entry_state(Zone z, int total, int ema_n, int slot, int et) =>
-    bool valid = total >= alert_min
+    bool valid = total >= go_min
     string tf = tf_name(slot == 0 ? TF0 : slot == 1 ? TF1 : TF2)
     bool timing = et == 0 ? false : et == 1 ? (z.inside or (z.gap_out and z.touches == 0)) : et == 2 ? (z.inside and not na(z.zc_t)) : (not z.inside and visit_live(z))
     bool ema_ok = not ema_required or ema_n == 1
@@ -1340,7 +1343,7 @@ entry_state(Zone z, int total, int ema_n, int slot, int et) =>
     string why = et == 2 ? "zone entry, a " + tf + " candle closed inside" : et == 3 ? "exit entry, a " + tf + " candle closed back out" :
          slot == 1 and z.inside ? "touch entry, " + tf_name(TF1) + " first touch, no " + tf_name(TF0) + " zone inside" : z.inside ? "touch entry, retest now" : "gap away, no retest needed"
     string wait = et == 1 ? "WAIT FOR RETEST (touch entry)" : et == 2 ? (z.inside ? "WAIT FOR A " + tf + " CLOSE INSIDE (zone entry)" : "WAIT FOR PRICE (zone entry)") : (z.inside ? "WAIT FOR A " + tf + " CLOSE BACK OUT (exit entry)" : "WAIT FOR PRICE TO GO IN AND TURN (exit entry)")
-    string st = et == 0 ? "NO (one and done: this " + tf + " zone has had its touch)" : not valid ? "NO (score under " + str.tostring(alert_min) + ")" : not timing ? wait : not ema_ok ? "WAIT FOR EMA (" + why + ", EMA not with the zone)" : "GO (" + why + ")"
+    string st = et == 0 ? "NO (one and done: this " + tf + " zone has had its touch)" : not valid ? "NO (score under " + str.tostring(go_min) + ")" : not timing ? wait : not ema_ok ? "WAIT FOR EMA (" + why + ", EMA not with the zone)" : "GO (" + why + ")"
     [go, st]
 
 score_line(int total, int s_range, int s_time, int s_trend, int s_move, int s_os, int s_pur, int s_rrr, float rrr, float ratio, float pos, string opp_nm, float r_top, float r_btm, string r_top_nm, string r_btm_nm, bool split) =>
@@ -1464,7 +1467,7 @@ if barstate.islast
     // fires on every bar close, with an empty setups list when there is no target, so the board can tell a silent alert from a chart with nothing to report
     if alerts_on and barstate.isconfirmed
         string trend_s = t_cons ? "CONSOLIDATION" : t_st == 1 ? "UP" : t_st == -1 ? "DOWN" : "RANGE"
-        string msg = '{"symbol":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","chart_tf":"' + timeframe.period + '","style":"' + (use_custom ? 'Custom' : str.split(style, ' (').get(0)) + '","low_tf":"' + tf_name(TF0) + '","mid_tf":"' + tf_name(TF1) + '","high_tf":"' + tf_name(TF2) + '","price":' + num(close) + ',"bar_time":' + str.tostring(time) + ',"trend":"' + trend_s + '","low_trend":"' + (l_st == 1 ? "UP" : l_st == -1 ? "DOWN" : "RANGE") + '","control_point":' + num(t_cp) + ',"range_top":' + num(r_top) + ',"range_btm":' + num(r_btm) + ',"alert_min":' + str.tostring(alert_min) + ',"setups":[' + s_json + (s_json != "" and d_json != "" ? "," : "") + d_json + ']}'
+        string msg = '{"symbol":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","chart_tf":"' + timeframe.period + '","style":"' + (use_custom ? 'Custom' : str.split(style, ' (').get(0)) + '","low_tf":"' + tf_name(TF0) + '","mid_tf":"' + tf_name(TF1) + '","high_tf":"' + tf_name(TF2) + '","price":' + num(close) + ',"bar_time":' + str.tostring(time) + ',"trend":"' + trend_s + '","low_trend":"' + (l_st == 1 ? "UP" : l_st == -1 ? "DOWN" : "RANGE") + '","control_point":' + num(t_cp) + ',"range_top":' + num(r_top) + ',"range_btm":' + num(r_btm) + ',"alert_min":' + str.tostring(go_min) + ',"setups":[' + s_json + (s_json != "" and d_json != "" ? "," : "") + d_json + ']}'
         alert(msg, alert.freq_once_per_bar_close)
 
 alertcondition(be_now, "Move stop to breakeven", "{{ticker}}: the target zone trade reached +1R, move the stop to breakeven")

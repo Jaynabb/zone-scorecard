@@ -9,12 +9,12 @@ indicator("Jay S&D", overlay=true, max_bars_back=500, max_boxes_count=500, max_l
 // slot 2 = High (range and backing). Matches the presets on the Zone Scorecard site.
 //-----------------------------------------------------------------------------
 string style_group = 'Trading Style'
-string style = input.string('Longer Swing (D / W / M)', 'Trading Style', options=['Scalping (5m / 30m / 1H)', 'Scalping (5m / 15m / 1H)', 'Day Trading (1H / 4H / D)', 'Swing Trading (4H / D / W)', 'Longer Swing (D / W / M)', 'Custom'], group=style_group, tooltip='Low / Mid / High timeframes, from the trading sheet. Scalping (short-term): 5 Min / 30 or 15 Min / Hourly. Day trading: 1 hr / 4 hr / Daily. Swing (weekly trading): 4 hr / Daily / Weekly. Longer swing (monthly trading): Daily / Weekly / Monthly. Low is where the entry zones (targets) come from, Mid is the trend, High is the range and the backing. Custom uses the three inputs below. Changing any of the three inputs below away from Daily / Weekly / Monthly also switches to them, whatever style is picked.')
-string tf_low_in = input.timeframe('D', 'Custom Low Timeframe', group=style_group)
-string tf_mid_in = input.timeframe('W', 'Custom Mid Timeframe', group=style_group)
-string tf_high_in = input.timeframe('M', 'Custom High Timeframe', group=style_group)
-// editing the custom timeframes away from their defaults means the trader wants them, even with a preset style still picked
-bool use_custom = style == 'Custom' or timeframe.in_seconds(tf_low_in) != timeframe.in_seconds('D') or timeframe.in_seconds(tf_mid_in) != timeframe.in_seconds('W') or timeframe.in_seconds(tf_high_in) != timeframe.in_seconds('M')
+string style = input.string('Longer Swing (D / W / M)', 'Trading Style', options=['Scalping (5m / 30m / 1H)', 'Scalping (5m / 15m / 1H)', 'Day Trading (1H / 4H / D)', 'Swing Trading (4H / D / W)', 'Longer Swing (D / W / M)', 'Custom'], group=style_group, tooltip='Low / Mid / High timeframes, from the trading sheet. Scalping (short-term): 5 Min / 30 or 15 Min / Hourly. Day trading: 1 hr / 4 hr / Daily. Swing (weekly trading): 4 hr / Daily / Weekly. Longer swing (monthly trading): Daily / Weekly / Monthly. Low is where the entry zones (targets) come from, Mid is the trend, High is the range and the backing. Custom uses the three inputs below; the presets ignore them.')
+string tf_low_in = input.timeframe('D', 'Custom Low Timeframe', group=style_group, tooltip='Only used when Trading Style is Custom.')
+string tf_mid_in = input.timeframe('W', 'Custom Mid Timeframe', group=style_group, tooltip='Only used when Trading Style is Custom.')
+string tf_high_in = input.timeframe('M', 'Custom High Timeframe', group=style_group, tooltip='Only used when Trading Style is Custom.')
+// the custom timeframes apply only with the Custom style; a preset always uses its own three
+bool use_custom = style == 'Custom'
 string TF0 = use_custom ? tf_low_in : style == 'Longer Swing (D / W / M)' ? 'D' : style == 'Swing Trading (4H / D / W)' ? '240' : style == 'Day Trading (1H / 4H / D)' ? '60' : '5'
 string TF1 = use_custom ? tf_mid_in : style == 'Longer Swing (D / W / M)' ? 'W' : style == 'Swing Trading (4H / D / W)' ? 'D' : style == 'Day Trading (1H / 4H / D)' ? '240' : style == 'Scalping (5m / 30m / 1H)' ? '30' : '15'
 string TF2 = use_custom ? tf_high_in : style == 'Longer Swing (D / W / M)' ? 'M' : style == 'Swing Trading (4H / D / W)' ? 'W' : style == 'Day Trading (1H / 4H / D)' ? 'D' : '60'

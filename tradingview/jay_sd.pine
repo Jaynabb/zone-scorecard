@@ -1162,7 +1162,16 @@ refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<bo
                 Zone z = zones.get(i)
                 box b = z.b
                 float gap = b.get_bottom() > close ? b.get_bottom() - close : b.get_top() < close ? close - b.get_top() : 0.0
-                bool near = na(reach) or gap <= reach
+                // a zone that a newer base of its side formed on (price came back, based on it and left again) is the origin
+                // of that move: it stays on the chart however far price has gone, as long as it holds
+                bool origin = false
+                if n > 1
+                    for q = 0 to n - 1
+                        Zone oz = zones.get(q)
+                        if q != i and oz.lt > z.lt and oz.b.get_top() >= b.get_bottom() and oz.b.get_bottom() <= b.get_top()
+                            origin := true
+                            break
+                bool near = na(reach) or gap <= reach or origin
                 // one outline per area on the Low timeframe (where chop stacks them): a dashed zone with a newer base of this
                 // timeframe on it is left to that newer zone. A Low timeframe zone inside a higher timeframe zone still shows:
                 // the entry timeframe's own edges are the ones traded. On the Mid and High timeframes every retest base still

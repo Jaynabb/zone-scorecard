@@ -52,6 +52,10 @@ Examples: USOIL 5M 81.26-81.36 (base 06:05-06:10; 06:15 to 07:00 is the move up)
 
 - When price comes back to an older zone and bases again, the new base is the zone and the older one is hidden.
 - A base that is only a reaction off a higher timeframe zone is not a new zone.
+- **Origin zones stay on the chart.** When price comes back to a valid zone, bases on it and leaves again, the
+  retest base may be drawn too, but the older zone is the origin of the move and always stays visible (dashed once
+  touched) until a close goes through it, however far price has run. Example: BTC 5M demand 59038-59163 (12:10 doji)
+  with the 12:25 retest base 58946-59080 under it.
 
 ## 7. Worked example: BTC 5M, 2026-11-25 (Jay's story)
 

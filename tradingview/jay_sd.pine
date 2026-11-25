@@ -358,10 +358,27 @@ detect(bool is_supply, int k, float yard) =>
                     else if not level
                         break
                     j_far += 1
+                // impulse side: the base runs to the last candle whose body comes back to the extreme (within 0.6 of a
+                // typical body). A sideways base that steps away and returns is all base; once price leaves and does not
+                // come back, the candles after the last return are the move out
                 int j_near = t_j
+                float t_body_ext = is_supply ? math.max(open[k + t_j], close[k + t_j]) : math.min(open[k + t_j], close[k + t_j])
+                if t_j - 1 >= legs + 1
+                    for jj = legs + 1 to t_j - 1
+                        int o4 = k + jj
+                        float back = is_supply ? t_body_ext - math.max(open[o4], close[o4]) : math.min(open[o4], close[o4]) - t_body_ext
+                        if back <= 0.6 * yard
+                            j_near := jj
+                            break
+                // then on toward the impulse while candles stay inside the range of bodies the base has already set
+                float rb_hi = na
+                float rb_lo = na
+                for jj = j_near to j_far
+                    rb_hi := na(rb_hi) ? math.max(open[k + jj], close[k + jj]) : math.max(rb_hi, math.max(open[k + jj], close[k + jj]))
+                    rb_lo := na(rb_lo) ? math.min(open[k + jj], close[k + jj]) : math.min(rb_lo, math.min(open[k + jj], close[k + jj]))
                 while j_near - 1 >= legs + 1
                     int o4 = k + j_near - 1
-                    if is_supply ? math.min(open[o4], close[o4]) < lvl : math.max(open[o4], close[o4]) > lvl
+                    if math.max(open[o4], close[o4]) > rb_hi or math.min(open[o4], close[o4]) < rb_lo
                         break
                     j_near -= 1
                 // candles between the extreme and an older one that the new level leaves out are trimmed from the far side

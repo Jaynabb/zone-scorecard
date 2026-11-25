@@ -328,6 +328,53 @@ detect(bool is_supply, int k, float yard) =>
             if arrival and turn_j < legs + cnt
                 cnt := turn_j - legs
                 lt := time[o3]
+            // The base is the candle at the extreme and its neighbours that stay level with it (bodies within a quarter of
+            // a typical body of its far body edge). A candle stepping away from that level ends the base: on the impulse
+            // side it is the move out already under way, on the other side the move in. The zone never holds the move.
+            // The search goes on past the walk's candle limit on the old side, since the candles of the move out do not
+            // count toward it, and a deeper level candle found there becomes the extreme
+            if cnt >= 2
+                int t_j = turn_j
+                float tb_hi = math.max(open[k + t_j], close[k + t_j])
+                float tb_lo = math.min(open[k + t_j], close[k + t_j])
+                float lvl = is_supply ? math.min(tb_lo, tb_hi - 0.25 * yard) : math.max(tb_hi, tb_lo + 0.25 * yard)
+                int j_far = t_j
+                int j_lim = legs + cnt + base_max
+                while j_far + 1 <= j_lim
+                    int o4 = k + j_far + 1
+                    if na(open[o4]) or na(close[o4])
+                        break
+                    float b4_hi = math.max(open[o4], close[o4])
+                    float b4_lo = math.min(open[o4], close[o4])
+                    bool deeper = is_supply ? b4_hi > tb_hi : b4_lo < tb_lo
+                    bool level = is_supply ? b4_lo >= lvl : b4_hi <= lvl
+                    if deeper and level
+                        // a level candle reaching further is the new extreme: the level is measured from it
+                        t_j := j_far + 1
+                        tb_hi := b4_hi
+                        tb_lo := b4_lo
+                        lvl := is_supply ? math.min(tb_lo, tb_hi - 0.25 * yard) : math.max(tb_hi, tb_lo + 0.25 * yard)
+                    else if not level
+                        break
+                    j_far += 1
+                int j_near = t_j
+                while j_near - 1 >= legs + 1
+                    int o4 = k + j_near - 1
+                    if is_supply ? math.min(open[o4], close[o4]) < lvl : math.max(open[o4], close[o4]) > lvl
+                        break
+                    j_near -= 1
+                // candles between the extreme and an older one that the new level leaves out are trimmed from the far side
+                int j_back = j_far
+                while j_back > t_j
+                    int o4 = k + j_back
+                    if is_supply ? math.min(open[o4], close[o4]) < lvl : math.max(open[o4], close[o4]) > lvl
+                        j_back -= 1
+                    else
+                        break
+                j_far := j_back
+                legs := j_near - 1
+                cnt := j_far - j_near + 1
+                lt := time[k + j_far]
         // Spike wicks: on a base of two or more candles, the far edge is the most extreme wick that is not a spike (see
         // below). A spike is a liquidity grab inside the pause, not where the zone ends; the wick to body rule still holds
         // for the wicks that remain.

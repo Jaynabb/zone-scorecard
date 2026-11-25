@@ -1275,6 +1275,27 @@ if barstate.islast
     if anchor_slot != 2
         refresh(sup_m, true, 2, false, a_s, corr_only)
         refresh(dem_m, false, 2, false, a_d, corr_only)
+    // Each chart shows its own timeframe and the one above it, nothing else: a 1H chart (Day Trading) shows 1H and 4H
+    // zones, a 4H chart 4H and Daily, a Daily chart Daily. The other style timeframes are checked on their own charts.
+    // Their targets were picked above, so the score labels and the trend table stay
+    if chart_slot == 0
+        sup_m.hide_all(true, 2)
+        dem_m.hide_all(false, 2)
+    else if chart_slot > 0
+        sup_d.hide_all(true, 0)
+        dem_d.hide_all(false, 0)
+        if chart_slot == 2
+            sup_w.hide_all(true, 1)
+            dem_w.hide_all(false, 1)
+        // redraw the shown timeframes without the hidden lower boxes, so none is left out as a copy of a hidden one
+        drawn_b.clear()
+        drawn_k.clear()
+        drawn_full.clear()
+        if chart_slot == 1
+            refresh(sup_w, true, 1, false, a_s, corr_only)
+            refresh(dem_w, false, 1, false, a_d, corr_only)
+        refresh(sup_m, true, 2, false, a_s, corr_only)
+        refresh(dem_m, false, 2, false, a_d, corr_only)
     // A chart timeframe the style does not include shows only its own zones, for drilling down: the style's boxes are
     // hidden there (their targets were still picked above, so the score labels and the trend table stay). Never a target
     if show_c

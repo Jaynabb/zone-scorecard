@@ -235,9 +235,9 @@ detect(bool is_supply, int k, float yard) =>
     // a candle closing back toward the base adds nothing: only the gap itself can drive then
     float drive = away ? body + nz(gap_in) : nz(gap_in)
     // a candle a little under the size rule still drives when price clearly left the base: it closes past the whole
-    // range of the candle before it (wick included) and the move from that candle's body to this close is an impulse
-    // in size. Chop that stays inside the base candle's range never qualifies
-    float move_out = is_supply ? prev_top - close[k] : close[k] - prev_btm
+    // range of the candle before it (wick included) and the move from that candle's far wick (the zone's edge) to this
+    // close is an impulse in size. Chop that stays inside the base candle's range never qualifies
+    float move_out = is_supply ? high[k + 1] - close[k] : close[k] - low[k + 1]
     bool cleared = is_supply ? close[k] < low[k + 1] : close[k] > high[k + 1]
     if away and drive < lim and cleared and move_out >= lim
         drive := move_out
@@ -310,8 +310,9 @@ detect(bool is_supply, int k, float yard) =>
                     turn_j := j2
             int o3 = k + turn_j
             // the candle before the turn stepped toward it (against the impulse, its body further from the turn's
-            // extreme): it is the move in, so the base starts at the turn
-            bool arrival = is_supply ? close[o3 + 1] > open[o3 + 1] and math.max(open[o3 + 1], close[o3 + 1]) < ext_b : close[o3 + 1] < open[o3 + 1] and math.min(open[o3 + 1], close[o3 + 1]) > ext_b
+            // extreme, or level with it: a leg in that closes right where the pause opens is still the leg in): it is the
+            // move in, so the base starts at the turn
+            bool arrival = is_supply ? close[o3 + 1] > open[o3 + 1] and math.max(open[o3 + 1], close[o3 + 1]) <= ext_b : close[o3 + 1] < open[o3 + 1] and math.min(open[o3 + 1], close[o3 + 1]) >= ext_b
             if arrival and turn_j < legs + cnt
                 cnt := turn_j - legs
                 lt := time[o3]
@@ -353,6 +354,15 @@ detect(bool is_supply, int k, float yard) =>
                 far := na(far) ? (is_supply ? b_hi : b_lo) : far
             z_top := is_supply ? far : b_hi
             z_btm := is_supply ? b_lo : far
+            // a one candle doji base (body at most a quarter of its range): its body is no edge, so the zone runs from the
+            // wick on the impulse side to the body's far side (supply: low up to the top of the body; demand: high down to
+            // the bottom of the body), the way the trader marks it
+            if cnt == 1
+                int od = k + legs + 1
+                float rgd = high[od] - low[od]
+                if rgd > 0 and math.abs(close[od] - open[od]) <= 0.25 * rgd
+                    z_top := is_supply ? math.max(open[od], close[od]) : high[od]
+                    z_btm := is_supply ? low[od] : math.min(open[od], close[od])
         // V-shaped turn: no small base, but the candle next to the impulse holds the extreme.
         // That candle is the base on its own, wick to body, as long as the impulse (body plus any gap) is at
         // least as big as it. A candle bigger than the impulse is a drive, not a base. This is how the sheet

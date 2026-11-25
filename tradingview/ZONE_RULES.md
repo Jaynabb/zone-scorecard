@@ -37,7 +37,8 @@ Examples: USOIL 5M 81.26-81.36 (base 06:05-06:10; 06:15 to 07:00 is the move up)
 ## 4. Doji bases (one candle, body a quarter of its range or less)
 
 - **Normal:** wick to body, like any base. Examples: USOIL 5M 07:00 (81.57-81.64), ETH 5M 22:20
-  (1663.89-1668.98), BTC 5M 10:35 (58245-58599, Jay 58242-58597), USOIL Monthly Apr 2026 (101.72-117.63).
+  (1663.89-1668.98), BTC 5M 10:35 (58245-58599, Jay 58242-58597), BTC 5M 08:25 supply (58768.91-58835.67,
+  Jay 58768.92-58836.54; 08:20 green is the leg in, 08:30 red the leg out), USOIL Monthly Apr 2026 (101.72-117.63).
 - **Flip:** only when the wick on the zone's far side is a stub (under a quarter of a typical body) and the other
   wick is long. Then the zone runs from the long wick to the body's far side. Example: NQ 1H 16:00 supply
   (26215.25-26284.25).
@@ -54,8 +55,4 @@ Examples: USOIL 5M 81.26-81.36 (base 06:05-06:10; 06:15 to 07:00 is the move up)
 
 ## Open questions
 
-- **BTC 5M zone A, 58682-58837 (08:05 to 08:25, drop at 08:30):** the top is the 08:25 doji's high (58835.67). The
-  bottom (58682) matches the top of the 07:40-08:05 range (highs 58670-58688) and the 08:10 close, not a wick to
-  body edge of 08:25 (58768.91) or of the 08:10-08:25 candles (lowest body 58554). Still to confirm which rule
-  sets that bottom.
 - **V-top with no small base** (BTC 5M 10:00, a full size rally candle that price turned down from): how to mark it.

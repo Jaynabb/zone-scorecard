@@ -199,6 +199,9 @@ int mode_m = f_mode(TF2)
 // the chart's own timeframe gets its zones too when the trading style does not include it
 bool show_c = mode_d != 0 and mode_w != 0 and mode_m != 0
 
+// the style slot drawn at the chart's own timeframe (-1 when the chart timeframe is not in the style)
+int chart_slot = mode_d == 0 ? 0 : mode_w == 0 ? 1 : mode_m == 0 ? 2 : -1
+
 // the timeframe a slot reads
 slot_tf(int slot) =>
     slot == 0 ? TF0 : slot == 1 ? TF1 : slot == 2 ? TF2 : timeframe.period
@@ -1083,7 +1086,10 @@ refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<bo
         // chart timeframe and above: an old Daily zone far below a Monthly chart is clutter, not a level in play
         int md = slot == 0 ? mode_d : slot == 1 ? mode_w : slot == 2 ? mode_m : 0
         float reach = faint_reach > 0 ? faint_reach * slot_yard.get(slot) : na
-        if show_all and md != 2
+        // older (dashed) zones only for the chart's own timeframe and the one above it: a Daily retest base on a 1H chart
+        // is checked on the 4H or Daily chart, not stacked here
+        bool faint_tf = slot == 3 or (chart_slot >= 0 and (slot == chart_slot or slot == chart_slot + 1))
+        if show_all and md != 2 and faint_tf
             for i = 0 to n - 1
                 Zone z = zones.get(i)
                 box b = z.b

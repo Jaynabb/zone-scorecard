@@ -241,6 +241,8 @@ detect(bool is_supply, int k, float yard) =>
         float a_hi = na
         float w_lo = na   // running wick extremes of the base
         float w_hi = na
+        float bb_lo = na  // running body extremes of the base
+        float bb_hi = na
         for j = 1 to base_max + 4
             if cnt >= base_max
                 break
@@ -254,9 +256,6 @@ detect(bool is_supply, int k, float yard) =>
             bool tiny = math.abs(close[off] - open[off]) <= 0.25 * yard
             if cnt == 0 and legs < 4 and (leg_c or (legs > 0 and tiny and leg_prev))
                 legs += 1
-                // the leg is part of the move, so it counts toward the impulse size the base candles are measured against
-                drive += math.abs(close[off] - open[off])
-                base_lim := drive * base_mult
                 continue
             float bd = math.abs(close[off] - open[off])
             float bh = math.max(open[off], close[off])
@@ -278,6 +277,11 @@ detect(bool is_supply, int k, float yard) =>
             // each base candle's body must share price with the base so far, so the walk stops where the pause started
             if cnt > 0 and (bh < a_lo or bl > a_hi)
                 break
+            // a pause is tight: the walk stops before the base's bodies would span more than three typical bodies
+            if cnt > 0 and math.max(nz(bb_hi, bh), bh) - math.min(nz(bb_lo, bl), bl) > 3 * yard
+                break
+            bb_hi := na(bb_hi) ? bh : math.max(bb_hi, bh)
+            bb_lo := na(bb_lo) ? bl : math.min(bb_lo, bl)
             a_lo := na(a_lo) ? low[off] : math.min(a_lo, low[off])
             a_hi := na(a_hi) ? high[off] : math.max(a_hi, high[off])
             cnt += 1
@@ -613,24 +617,8 @@ create_zone(array<Zone> zones, bool is_supply, float z_top, float z_btm, int lef
             if over and (oz.via_lower or oz.lt >= left_time)
                 oz.b.delete()
                 zones.remove(i)
-    // A base that forms inside an older zone of the same timeframe and side while price is retesting it is that zone's
-    // retest reaction, not a new zone: the older zone is kept (stretched to the new wick if it poked out) with its touch
-    // history, so the area does not read as fresh. A zone that holds is still the zone however old it is. A base mostly
-    // outside it is its own zone. Only on the Low timeframe (entries, where retest history feeds purity): on the Mid and
-    // High timeframes a newer base is drawn as its own zone next to the older one, since those are levels to watch and
-    // the most recent base is the one that matters there
-    if ok and slot == 0 and zones.size() > 0
-        for i = 0 to zones.size() - 1
-            Zone oz = zones.get(i)
-            float o_top = oz.b.get_top()
-            float o_btm = oz.b.get_bottom()
-            float ov = math.min(top, o_top) - math.max(btm, o_btm)
-            bool retested = oz.touches > 0 and not na(oz.e_t) and oz.e_t <= left_time
-            if retested and ov >= 0.5 * (top - btm)
-                oz.b.set_top(math.max(top, o_top))
-                oz.b.set_bottom(math.min(btm, o_btm))
-                ok := false
-                break
+    // A base that forms inside an older zone of the same side after that zone's impulse is a retest reaction, not a new
+    // zone: it is drawn faint and is never a target (see flag_reactions); the older zone keeps its own range
     if ok and not zones.overlaps(top, btm)
         [w, tr, nm] = zone_style(slot)
         color base = zone_color(slot, is_supply)
@@ -1045,22 +1033,24 @@ refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<bo
                 box b = z.b
                 float gap = b.get_bottom() > close ? b.get_bottom() - close : b.get_top() < close ? close - b.get_top() : 0.0
                 bool near = na(reach) or gap <= reach
-                // one outline per area: a dashed zone mostly inside an older zone of this timeframe, or inside a higher
-                // timeframe zone, is left to that zone's outline
+                // one outline per area on the Low timeframe (where chop stacks them): a dashed zone mostly inside an older
+                // zone of this timeframe, or inside a higher timeframe zone, is left to that zone's outline. On the Mid and
+                // High timeframes every retest base still shows, since the newest base is the level watched there
                 bool covered = false
                 float hb = b.get_top() - b.get_bottom()
-                for s2 = slot to 2
-                    array<Zone> cz = s2 == 0 ? (is_supply ? sup_d : dem_d) : s2 == 1 ? (is_supply ? sup_w : dem_w) : (is_supply ? sup_m : dem_m)
-                    if cz.size() > 0 and hb > 0
-                        for q = 0 to cz.size() - 1
-                            Zone oz = cz.get(q)
-                            if not (s2 == slot and q == i) and (s2 > slot or oz.lt < z.lt)
-                                float ov = math.min(b.get_top(), oz.b.get_top()) - math.max(b.get_bottom(), oz.b.get_bottom())
-                                if ov >= 0.5 * hb
-                                    covered := true
-                                    break
-                    if covered
-                        break
+                if slot == 0
+                    for s2 = slot to 2
+                        array<Zone> cz = s2 == 0 ? (is_supply ? sup_d : dem_d) : s2 == 1 ? (is_supply ? sup_w : dem_w) : (is_supply ? sup_m : dem_m)
+                        if cz.size() > 0 and hb > 0
+                            for q = 0 to cz.size() - 1
+                                Zone oz = cz.get(q)
+                                if not (s2 == slot and q == i) and (s2 > slot or oz.lt < z.lt)
+                                    float ov = math.min(b.get_top(), oz.b.get_top()) - math.max(b.get_bottom(), oz.b.get_bottom())
+                                    if ov >= 0.5 * hb
+                                        covered := true
+                                        break
+                        if covered
+                            break
                 if near and not covered and not shown_flag.get(i) and not (use_filter and not anchors.overlaps_any(b.get_top(), b.get_bottom())) and not dup_lower(slot, is_supply, b, false)
                     // outline only, bright green for demand and red for supply, so old zones read apart from the drawn ones
                     b.set_bgcolor(color.new(base, 100))
@@ -1159,10 +1149,19 @@ if barstate.islast
     // size the boxes once, on the last bar, so no box is ever positioned off the start of the chart
     int future_time = time + (5 * timeframe.in_seconds() * 1000)
     sup_d.size_all(0, future_time)
+    // minor zones far from price are hidden like far faint zones (Faint Zones Within), so an old swing weeks away does
+    // not stretch the chart's scale
+    float m_reach = faint_reach > 0 ? faint_reach * m_yard : na
     for b in min_sup
         b.set_right(future_time)
+        bool m_near = na(m_reach) or b.get_bottom() - close <= m_reach
+        b.set_bgcolor(color.new(sup_d_col, m_near ? 92 : 100))
+        b.set_border_color(color.new(sup_d_col, m_near ? 15 : 100))
     for b in min_dem
         b.set_right(future_time)
+        bool m_near = na(m_reach) or close - b.get_top() <= m_reach
+        b.set_bgcolor(color.new(dem_d_col, m_near ? 92 : 100))
+        b.set_border_color(color.new(dem_d_col, m_near ? 15 : 100))
     dem_d.size_all(0, future_time)
     sup_w.size_all(1, future_time)
     dem_w.size_all(1, future_time)
@@ -1548,7 +1547,10 @@ mid_touch_zone(array<Zone> mids, array<Zone> lows, bool is_supply) =>
                 // price past the far edge has hit the stop of the trade taken on the touch, even while the Mid candle that
                 // would break the zone is still open, so the zone is no longer the entry
                 bool beyond = is_supply ? close >= z.b.get_top() : close <= z.b.get_bottom()
-                if not inner and not beyond
+                // the first-touch entry is a fresh trade: only a touch within the last 20 Mid timeframe candles qualifies.
+                // An old touch whose trade never formally closed (stop at breakeven, no exit) is not a target years later
+                bool recent = time - z.e_t <= timeframe.in_seconds(TF1) * 1000 * 20
+                if not inner and not beyond and recent
                     bool live = z.inside
                     if not live
                         [st, tx, n0, k1, ke, re] = trade_walk(z, is_supply, 1)
@@ -1679,7 +1681,11 @@ score_zone(Zone z, bool is_supply, float r_top, float r_btm, box opp, string opp
 entry_state(Zone z, int total, int ema_n, int slot, int et) =>
     bool valid = total >= go_min
     string tf = tf_name(slot == 0 ? TF0 : slot == 1 ? TF1 : TF2)
-    bool timing = et == 0 ? false : et == 1 ? (z.inside or (z.gap_out and z.touches == 0)) : et == 2 ? (z.inside and not na(z.zc_t)) : (not z.inside and visit_live(z))
+    // the gap-away entry is taken right after the gap: it is live for the first two candles of the zone's timeframe after
+    // the zone is confirmed. Later, with price long gone, the zone waits for its retest like any other
+    int gap_ms = timeframe.in_seconds(slot == 0 ? TF0 : slot == 1 ? TF1 : TF2) * 1000 * 2
+    bool gap_live = z.gap_out and z.touches == 0 and not na(z.ct) and time - z.ct <= gap_ms
+    bool timing = et == 0 ? false : et == 1 ? (z.inside or gap_live) : et == 2 ? (z.inside and not na(z.zc_t)) : (not z.inside and visit_live(z))
     bool ema_ok = not ema_need or ema_n == 1
     bool go = valid and timing and ema_ok
     string why = et == 2 ? "zone entry, a " + tf + " candle closed inside" : et == 3 ? "exit entry, a " + tf + " candle closed back out" :

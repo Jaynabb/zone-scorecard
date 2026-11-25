@@ -10,7 +10,7 @@ def detect(sup, idx, base_max=10, base_mult=0.5):
     gap=max(pb-O[idx],0) if sup else max(O[idx]-pt,0); gap=gap if gap>mg else 0
     drive=(body+gap) if away else gap
     if drive<yard: return 'no impulse'
-    lim=drive*base_mult; legs=0; cnt=0; alo=ahi=None
+    lim=drive*base_mult; legs=0; cnt=0; alo=ahi=None; bbh=bbl=None
     j=0
     while j < base_max+4:
         j+=1
@@ -20,12 +20,14 @@ def detect(sup, idx, base_max=10, base_mult=0.5):
         legp = (C[o-1]<O[o-1] and C[o-1]<L[o-2]) if sup else (C[o-1]>O[o-1] and C[o-1]>H[o-2])
         tiny = abs(C[o]-O[o]) <= 0.25*yard
         if cnt==0 and legs<4 and (legc or (legs>0 and tiny and legp)):
-            legs+=1; drive+=abs(C[o]-O[o]); lim=drive*base_mult; continue
+            legs+=1; continue
         bd=abs(C[o]-O[o]); bh=max(O[o],C[o]); bl=min(O[o],C[o]); rg=H[o]-L[o]
         bal = rg>0 and bd<=rg*0.5 and bd<=drive
         if bd>lim and not (j==1+legs and gap>0) and not bal: break
         if cnt>0 and (O[o+1]>H[o]+mg or O[o+1]<L[o]-mg): break
         if cnt>0 and (bh<alo or bl>ahi): break
+        if cnt>0 and max(bbh,bh)-min(bbl,bl) > 3*yard: break
+        bbh=bh if cnt==0 else max(bbh,bh); bbl=bl if cnt==0 else min(bbl,bl)
         alo=L[o] if alo is None else min(alo,L[o]); ahi=H[o] if ahi is None else max(ahi,H[o]); cnt+=1
     if cnt==0: return 'no base'
     js=list(range(legs+1,legs+cnt+1))

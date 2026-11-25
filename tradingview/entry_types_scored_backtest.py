@@ -8,7 +8,9 @@
 # Score at each visit with that visit's purity (see scored_entry_backtest.py for the checks); valid at >= 14, or >= 16
 # with the 9 EMA agreeing on Scalping, where One And Done also leaves only the first visit. Stop a tenth of the zone past
 # the far edge; a Zone or Exit entry closer to the stop than a third of the zone height is skipped (tiny R).
-# Versions: FIXED 3:1, and ZONE TO ZONE with the Mid trend only (target the opposing zone's near edge).
+# Versions: FIXED 3:1, ZONE TO ZONE with the Mid trend only (target the opposing zone's near edge), and the indicator's
+# 9 EMA EXIT (stop -1R; at +1R the stop moves to breakeven; then out on the first close back across the 9 EMA, no fixed
+# target), on every valid setup and on with-trend setups only.
 # One trade at a time per symbol, $1000, 2% of equity per trade, compounding.
 # Usage: python entry_types_scored_backtest.py <datadir>
 import sys, numpy as np, pandas as pd
@@ -19,18 +21,25 @@ exec(base.split("for style, lo, mid, hi, go_min, need_ema in STYLES:")[0], g)
 load, zones, broken_at, score, account, one_at_a_time = (g[x] for x in ("load", "zones", "broken_at", "score", "account", "one_at_a_time"))
 mid_trend, high_range, SYMS, STYLES, MAXB = g["mid_trend"], g["high_range"], g["SYMS"], g["STYLES"], g["MAXB"]
 
-def sim(o, h, l, c, j, e, stop, d, target_px, fill):
+def sim(o, h, l, c, j, e, stop, d, target_px, fill, e9=None):
     risk = (e - stop) * d
     if risk <= 0: return None
-    tgt_r = 3.0 if target_px is None else (target_px - e) * d / risk
-    if tgt_r <= 0: return None
+    ema_exit = e9 is not None
+    tgt_r = None if ema_exit else (3.0 if target_px is None else (target_px - e) * d / risk)
+    if tgt_r is not None and tgt_r <= 0: return None
+    st, on = -1.0, False
     for i in range(j, min(j + MAXB, len(c))):
         fav = ((h[i] - e) if d == 1 else (e - l[i])) / risk
         adv = ((l[i] - e) if d == 1 else (e - h[i])) / risk
-        if fill and i == j and not ((c[i] > o[i]) if d == 1 else (c[i] < o[i])): fav = max((c[i] - e) * d / risk, 0.0)
-        if adv <= -1: return (j, i, -1.0)
-        if fav >= tgt_r: return (j, i, tgt_r)
-    return None
+        cl = (c[i] - e) * d / risk
+        if fill and i == j and not ((c[i] > o[i]) if d == 1 else (c[i] < o[i])): fav = max(cl, 0.0)
+        if adv <= st: return (j, i, st)
+        if ema_exit:
+            # out on a close back across the 9 EMA, only after the +1R candle (the stop is at breakeven by then)
+            if on and ((c[i] < e9[i]) if d == 1 else (c[i] > e9[i])): return (j, i, cl)
+            if fav >= 1: on = True; st = max(st, 0.0)
+        elif fav >= tgt_r: return (j, i, tgt_r)
+    return (j, min(j + MAXB, len(c)) - 1, (c[min(j + MAXB, len(c)) - 1] - e) * d / risk) if ema_exit and on else None
 
 def visits(z, o, h, l, c, start):
     # yields (visit_no, purity, j_touch, j_close_inside or None, j_close_out or None, dead_after)
@@ -66,7 +75,7 @@ def line(name, tr):
 
 for style, lo, mid, hi, go_min, need_ema in STYLES:
     one_done = lo == "5m"
-    res = {v: [] for v in ("3R", "Z2Z")}; span = []
+    res = {v: [] for v in ("3R", "Z2Z", "EMA", "EMAT")}; span = []
     for s in SYMS:
         L, M, H = load(s, lo), load(s, mid), load(s, hi)
         if len(L) < 300 or len(M) < 60 or len(H) < 25: continue
@@ -78,7 +87,7 @@ for style, lo, mid, hi, go_min, need_ema in STYLES:
         yl = pd.Series(np.abs(c - o)).rolling(20).median().values
         lz = zones(o, h, l, c, yl)
         for z in lz: z["brk"] = broken_at(z, c, z["k"] + 1)
-        cand = {v: [] for v in ("3R", "Z2Z")}
+        cand = {v: [] for v in ("3R", "Z2Z", "EMA", "EMAT")}
         for z in lz:
             d = -1 if z["sup"] else 1; hgt = z["top"] - z["btm"]
             near = z["btm"] if z["sup"] else z["top"]; far = z["top"] if z["sup"] else z["btm"]
@@ -106,8 +115,12 @@ for style, lo, mid, hi, go_min, need_ema in STYLES:
                 if s_tr == 4 and opp is not None:
                     r = sim(o, h, l, c, je, e, stop, d, opp, fill)
                     if r: cand["Z2Z"].append((t[r[0]], t[r[1]], r[2], et))
+                r = sim(o, h, l, c, je, e, stop, d, None, fill, e9)
+                if r:
+                    cand["EMA"].append((t[r[0]], t[r[1]], r[2], et))
+                    if s_tr == 4: cand["EMAT"].append((t[r[0]], t[r[1]], r[2], et))
         for v in cand: res[v].extend(one_at_a_time(cand[v]))
     print(f"\n#### {style}: entry {lo}, Mid {mid}, High {hi}, valid score >= {go_min}{' + 9 EMA, one and done' if need_ema else ''}   (data from: {', '.join(span)})")
-    for v, title in (("3R", "FIXED 3:1"), ("Z2Z", "ZONE TO ZONE, with trend only")):
+    for v, title in (("3R", "FIXED 3:1"), ("Z2Z", "ZONE TO ZONE, with trend only"), ("EMA", "9 EMA EXIT, every valid setup"), ("EMAT", "9 EMA EXIT, with trend only")):
         print(f"  {title}"); print(line("ALL", res[v]))
         for et in ORDER: print(line(et, [x for x in res[v] if x[3] == et]))

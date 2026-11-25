@@ -144,6 +144,8 @@ type Zone
     float zc_px = na      // ... and its close
     int x_t = na          // latest visit: chart bar time of the candle that closed back out past the near edge (Exit entry)
     float x_px = na       // ... and its close
+    int ct = na           // chart bar time the zone was created (confirmed)
+    bool rr = false       // Low timeframe only: its base formed inside a higher timeframe zone after that zone's impulse, so it is that zone's retest reaction (no trade, never a target)
     bool retired = false  // past its touch limit (One And Done or Remove After N Touches): still valid supply or demand, drawn faint, never a target
     int it = na           // open time of the impulse candle (the candles after it are where retests can start)
     bool fresh = true     // just created: the candles between its impulse and now have not been checked for retests yet
@@ -576,6 +578,7 @@ create_zone(array<Zone> zones, bool is_supply, float z_top, float z_btm, int lef
         z.gap_out := go
         z.ext := mx
         z.it := imp_t
+        z.ct := time
         z.os := broke_opposing(slot, is_supply, left_time, imp_t)
         zones.unshift(z)
         zones.trim(max_zones)
@@ -855,6 +858,29 @@ method hide_all(array<Zone> zones, bool is_supply, int slot) =>
             b.set_border_color(color.new(base, 100))
             b.set_text("")
 
+// Marks each Low timeframe zone whose base formed mostly inside a Mid or High timeframe zone of the same side after that
+// zone's impulse candle had closed: price was back in the higher zone, so the base is its retest reaction, not a fresh
+// level. Judged on the last bar from fixed history (base and impulse times), so the order zones were confirmed in does not matter
+flag_reactions(array<Zone> lows, bool is_supply) =>
+    if lows.size() > 0
+        for i = 0 to lows.size() - 1
+            Zone z = lows.get(i)
+            float h = z.b.get_top() - z.b.get_bottom()
+            bool hit = false
+            for s2 = 1 to 2
+                array<Zone> hz = s2 == 1 ? (is_supply ? sup_w : dem_w) : (is_supply ? sup_m : dem_m)
+                int tf_ms = timeframe.in_seconds(s2 == 1 ? TF1 : TF2) * 1000
+                if hz.size() > 0 and h > 0
+                    for q = 0 to hz.size() - 1
+                        Zone oz = hz.get(q)
+                        float ov = math.min(z.b.get_top(), oz.b.get_top()) - math.max(z.b.get_bottom(), oz.b.get_bottom())
+                        if not na(oz.it) and oz.it + tf_ms <= z.lt and ov >= 0.5 * h
+                            hit := true
+                            break
+                if hit
+                    break
+            z.rr := hit
+
 // True when a drawn zone of a lower timeframe slot covers the same price range (each edge within a tenth of the height): the
 // higher timeframe zone was read from that base, so drawing both stacks two boxes on one level. The lower one is drawn
 // and its label shows the higher timeframe as backing
@@ -888,7 +914,7 @@ refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<bo
             if use_filter and not anchors.overlaps_any(b.get_top(), b.get_bottom())
                 d := na
             // a retired zone is never one of the nearest (it is not tradable); it is drawn faint below
-            if zones.get(i).retired
+            if zones.get(i).retired or zones.get(i).rr
                 d := na
             dist.set(i, d)
             b.set_bgcolor(color.new(base, 100))
@@ -957,7 +983,7 @@ refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<bo
                     drawn_k.push(slot * 2 + (is_supply ? 0 : 1))
                     drawn_full.push(false)
                     string nm2 = nm + (is_supply ? " SUPPLY" : " DEMAND")
-                    b.set_text(show_zone_info ? nm2 + " " + str.tostring(b.get_bottom(), format.mintick) + " - " + str.tostring(b.get_top(), format.mintick) + " | touches " + str.tostring(z.touches) + (z.retired ? " | no trade" : "") : "")
+                    b.set_text(show_zone_info ? nm2 + " " + str.tostring(b.get_bottom(), format.mintick) + " - " + str.tostring(b.get_top(), format.mintick) + " | touches " + str.tostring(z.touches) + (z.retired ? " | no trade" : z.rr ? " | retest of a higher zone" : "") : "")
     shown_boxes
 
 // The nearest zone of one side: the closest box above price for supply, below price for demand (a box that
@@ -1072,6 +1098,8 @@ if barstate.islast
     drawn_b.clear()
     drawn_k.clear()
     drawn_full.clear()
+    flag_reactions(sup_d, true)
+    flag_reactions(dem_d, false)
     if anchor_slot == 0
         a_s := refresh(sup_d, true, 0, hl_d, a_s, false)
         a_d := refresh(dem_d, false, 0, hl_d, a_d, false)

@@ -150,13 +150,16 @@ type Zone
     bool fresh = true     // just created: the candles between its impulse and now have not been checked for retests yet
     float chk = na        // drill-down only: the furthest close of this timeframe seen between the base and the turn (for checking the rule)
 
-// slot 0 = Daily, 1 = Weekly, 2 = Monthly
+// slot 0 = Low (entry), 1 = Mid, 2 = High; slot 3 = the chart's own timeframe when it is none of the three (its zones
+// are drawn as levels on that timeframe; scoring, targets and trend stay with the trading style)
 var array<Zone> sup_d = array.new<Zone>()
 var array<Zone> dem_d = array.new<Zone>()
 var array<Zone> sup_w = array.new<Zone>()
 var array<Zone> dem_w = array.new<Zone>()
 var array<Zone> sup_m = array.new<Zone>()
 var array<Zone> dem_m = array.new<Zone>()
+var array<Zone> sup_c = array.new<Zone>()
+var array<Zone> dem_c = array.new<Zone>()
 var array<label> tgt_labels = array.new<label>()   // right-margin labels for the target zones, rebuilt on every refresh
 // the target zones picked on the last bar (arrays, because functions may not assign globals), labeled and scored after the trend readout is known
 var array<Zone> tgt_zones = array.new<Zone>()
@@ -181,7 +184,7 @@ var array<int> turn_seen = array.new<int>()
 // keys of bases already turned into zones (left_time * 8 + slot * 2 + side), so a repeated report is not drawn twice
 var array<int> seen_keys = array.new<int>()
 // typical body of each slot's own timeframe (Low, Mid, High), for how far from price a faint zone is still drawn
-var array<float> slot_yard = array.new<float>(3, na)
+var array<float> slot_yard = array.new<float>(4, na)
 
 int chart_sec = timeframe.in_seconds()
 
@@ -193,6 +196,12 @@ f_mode(string tf) =>
 int mode_d = f_mode(TF0)
 int mode_w = f_mode(TF1)
 int mode_m = f_mode(TF2)
+// the chart's own timeframe gets its zones too when the trading style does not include it
+bool show_c = mode_d != 0 and mode_w != 0 and mode_m != 0
+
+// the timeframe a slot reads
+slot_tf(int slot) =>
+    slot == 0 ? TF0 : slot == 1 ? TF1 : slot == 2 ? TF2 : timeframe.period
 
 //-----------------------------------------------------------------------------
 // BASE DETECTION (runs inside each timeframe's own context)
@@ -512,6 +521,8 @@ int lo_bars_m = timeframe.in_seconds(TF2) < chart_sec ? 100000 : 5
 [w_sf, w_st, w_sb, w_stm, w_sn, w_si, w_df, w_dt, w_db, w_dtm, w_dn, w_di, w_c, w_h, w_l, w_a, w_stn, w_st0, w_st1, w_stx, w_dtn, w_dt0, w_dt1, w_dtx, w_sg, w_dg, w_so, w_do, w_sm, w_dm] = request.security(syminfo.tickerid, tf_w_hi, tf_pack())
 [m_sf, m_st, m_sb, m_stm, m_sn, m_si, m_df, m_dt, m_db, m_dtm, m_dn, m_di, m_c, m_h, m_l, m_a, m_stn, m_st0, m_st1, m_stx, m_dtn, m_dt0, m_dt1, m_dtx, m_sg, m_dg, m_so, m_do, m_sm, m_dm] = request.security(syminfo.tickerid, tf_m_hi, tf_pack())
 
+[c_sf, c_st, c_sb, c_stm, c_sn, c_si, c_df, c_dt, c_db, c_dtm, c_dn, c_di, c_c, c_h, c_l, c_a, c_stn, c_st0, c_st1, c_stx, c_dtn, c_dt0, c_dt1, c_dtx, c_sg, c_dg, c_so, c_do, c_sm, c_dm] = request.security(syminfo.tickerid, timeframe.period, tf_pack())
+
 [d_sf_a, d_st_a, d_sb_a, d_stm_a, d_sn_a, d_si_a, d_df_a, d_dt_a, d_db_a, d_dtm_a, d_dn_a, d_di_a, d_c_a, d_h_a, d_l_a, d_a_a, d_stn_a, d_st0_a, d_st1_a, d_stx_a, d_dtn_a, d_dt0_a, d_dt1_a, d_dtx_a, d_sg_a, d_dg_a, d_so_a, d_do_a, d_sm_a, d_dm_a] = request.security_lower_tf(syminfo.tickerid, tf_d_lo, tf_pack(), calc_bars_count=lo_bars_d)
 [w_sf_a, w_st_a, w_sb_a, w_stm_a, w_sn_a, w_si_a, w_df_a, w_dt_a, w_db_a, w_dtm_a, w_dn_a, w_di_a, w_c_a, w_h_a, w_l_a, w_a_a, w_stn_a, w_st0_a, w_st1_a, w_stx_a, w_dtn_a, w_dt0_a, w_dt1_a, w_dtx_a, w_sg_a, w_dg_a, w_so_a, w_do_a, w_sm_a, w_dm_a] = request.security_lower_tf(syminfo.tickerid, tf_w_lo, tf_pack(), calc_bars_count=lo_bars_w)
 [m_sf_a, m_st_a, m_sb_a, m_stm_a, m_sn_a, m_si_a, m_df_a, m_dt_a, m_db_a, m_dtm_a, m_dn_a, m_di_a, m_c_a, m_h_a, m_l_a, m_a_a, m_stn_a, m_st0_a, m_st1_a, m_stx_a, m_dtn_a, m_dt0_a, m_dt1_a, m_dtx_a, m_sg_a, m_dg_a, m_so_a, m_do_a, m_sm_a, m_dm_a] = request.security_lower_tf(syminfo.tickerid, tf_m_lo, tf_pack(), calc_bars_count=lo_bars_m)
@@ -522,7 +533,7 @@ int lo_bars_m = timeframe.in_seconds(TF2) < chart_sec ? 100000 : 5
 zone_style(int slot) =>
     int w = slot == 2 ? 2 : 1
     int tr = slot == 2 ? transp_m : slot == 1 ? transp_w : transp_d
-    string nm = tf_name(slot == 2 ? TF2 : slot == 1 ? TF1 : TF0)
+    string nm = tf_name(slot_tf(slot))
     [w, tr, nm]
 
 zone_color(int slot, bool is_supply) =>
@@ -707,7 +718,7 @@ step(Zone z, bool is_supply, int slot, float c, float h, float l, int t) =>
                 float pen = is_supply ? (h - b.get_bottom()) / hgt : (b.get_top() - l) / hgt
                 z.depth := math.max(z.depth, math.min(math.max(pen, 0.0), 1.0))
         z.inside := touching and not closed_out
-        int tlim = one_done and timeframe.in_seconds(slot == 0 ? TF0 : slot == 1 ? TF1 : TF2) < 3600 ? 1 : max_touches
+        int tlim = one_done and timeframe.in_seconds(slot_tf(slot)) < 3600 ? 1 : max_touches
         // past the touch limit the zone is no longer tradable, but price has not closed through it, so it stays on the
         // chart as a faint reference
         if tlim > 0 and z.touches > tlim
@@ -727,7 +738,7 @@ monitor(array<Zone> zones, bool is_supply, int slot, float c, float h, float l) 
 // chart bars since the impulse candle closed through the same per-candle check, oldest first.
 catch_up(array<Zone> zones, bool is_supply, int slot, float c, float h, float l, bool htf, bool tfn) =>
     if zones.size() > 0
-        int tf_ms = timeframe.in_seconds(slot == 0 ? TF0 : slot == 1 ? TF1 : TF2) * 1000
+        int tf_ms = timeframe.in_seconds(slot_tf(slot)) * 1000
         for i = zones.size() - 1 to 0
             Zone z = zones.get(i)
             if z.fresh
@@ -780,7 +791,7 @@ method update_os(array<Zone> zones, bool is_supply, int slot) =>
 
 // Records a higher timeframe turn that had no clean base.
 note_turn(int slot, bool is_supply, bool tn, int t0, int t1, float ext) =>
-    if slot > 0 and tn and not na(t0) and not na(t1)
+    if slot > 0 and slot < 3 and tn and not na(t0) and not na(t1)
         int key = t0 * 8 + slot * 2 + (is_supply ? 0 : 1)
         if turn_seen.indexof(key) < 0
             turn_seen.unshift(key)
@@ -794,7 +805,7 @@ note_turn(int slot, bool is_supply, bool tn, int t0, int t1, float ext) =>
 // Drops one timeframe to read the base: a zone of the timeframe below whose base sits inside the turn window
 // and at the turn's extreme is drawn back as a zone of this timeframe. Pending turns expire after 12 of their candles.
 resolve_turns(int slot, bool is_supply, array<Zone> zones, float yard_h, float tf_close) =>
-    if slot > 0 and pt_key.size() > 0
+    if slot > 0 and slot < 3 and pt_key.size() > 0
         int key = slot * 2 + (is_supply ? 0 : 1)
         array<Zone> lower = slot == 2 ? (is_supply ? sup_w : dem_w) : (is_supply ? sup_d : dem_d)
         int life = timeframe.in_seconds(slot == 2 ? TF2 : TF1) * 1000 * 12
@@ -1015,11 +1026,11 @@ refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<bo
             if use_filter and not anchors.overlaps_any(b.get_top(), b.get_bottom())
                 d := na
             // a retired zone is never one of the nearest (it is not tradable); it is drawn faint below
-            if zones.get(i).retired or zones.get(i).rr or (slot == 0 and superseded(zones, i))
+            if zones.get(i).retired or zones.get(i).rr or ((slot == 0 or slot == 3) and superseded(zones, i))
                 d := na
             // under 1 hour with One And Done, a zone that has had its touch and price has left is not tradable, so it is
             // not a target either (a zone price is in right now stays, so a trade in progress keeps its label)
-            if one_done and timeframe.in_seconds(slot == 0 ? TF0 : slot == 1 ? TF1 : TF2) < 3600 and zones.get(i).touches >= 1 and not zones.get(i).inside
+            if one_done and timeframe.in_seconds(slot_tf(slot)) < 3600 and zones.get(i).touches >= 1 and not zones.get(i).inside
                 d := na
             dist.set(i, d)
             b.set_bgcolor(color.new(base, 100))
@@ -1045,7 +1056,9 @@ refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<bo
             b.set_border_style(line.style_solid)
             string side_nm = nm + (is_supply ? " SUPPLY" : " DEMAND")
             string info = side_nm + " " + str.tostring(b.get_bottom(), format.mintick) + " - " + str.tostring(b.get_top(), format.mintick) + " | base " + str.tostring(z.base_n) + " | " + str.format_time(z.lt, "yyyy-MM-dd") + (z.gap ? " | gap refined" : "") + (z.via_lower ? " | base read below" + (na(z.chk) ? "" : (is_supply ? " | highest close since base " : " | lowest close since base ") + str.tostring(z.chk, format.mintick)) : "")
-            b.set_text(show_zone_info ? info : (is_target or label_targets_only ? "" : side_nm))
+            // a chart timeframe zone outside the trading style always names its timeframe, so it reads apart from the
+            // style's Low timeframe zones that share its colors
+            b.set_text(show_zone_info ? info : (is_target or (label_targets_only and slot != 3) ? "" : side_nm))
             if is_target
                 b.set_border_color(highlight_color)
                 b.set_border_width(3)
@@ -1070,7 +1083,7 @@ refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<bo
         // ago is on the chart when price comes back to it
         // Kept to the ones price can reach soon (within faint_reach typical bodies of their own timeframe) and to the
         // chart timeframe and above: an old Daily zone far below a Monthly chart is clutter, not a level in play
-        int md = slot == 0 ? mode_d : slot == 1 ? mode_w : mode_m
+        int md = slot == 0 ? mode_d : slot == 1 ? mode_w : slot == 2 ? mode_m : 0
         float reach = faint_reach > 0 ? faint_reach * slot_yard.get(slot) : na
         if show_all and md != 2
             for i = 0 to n - 1
@@ -1082,7 +1095,7 @@ refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<bo
                 // timeframe on it is left to that newer zone. A Low timeframe zone inside a higher timeframe zone still shows:
                 // the entry timeframe's own edges are the ones traded. On the Mid and High timeframes every retest base still
                 // shows, since the newest base is the level watched there
-                bool covered = slot == 0 and superseded(zones, i)
+                bool covered = (slot == 0 or slot == 3) and superseded(zones, i)
                 if near and not covered and not shown_flag.get(i) and not (use_filter and not anchors.overlaps_any(b.get_top(), b.get_bottom())) and not dup_lower(slot, is_supply, b, false)
                     // outline only, bright green for demand and red for supply, so old zones read apart from the drawn ones
                     b.set_bgcolor(color.new(base, 100))
@@ -1093,7 +1106,7 @@ refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<bo
                     drawn_k.push(slot * 2 + (is_supply ? 0 : 1))
                     drawn_full.push(false)
                     string nm2 = nm + (is_supply ? " SUPPLY" : " DEMAND")
-                    b.set_text(show_zone_info ? nm2 + " " + str.tostring(b.get_bottom(), format.mintick) + " - " + str.tostring(b.get_top(), format.mintick) + " | touches " + str.tostring(z.touches) + (z.retired ? " | no trade" : z.rr ? " | retest of a higher zone" : "") : "")
+                    b.set_text(show_zone_info ? nm2 + " " + str.tostring(b.get_bottom(), format.mintick) + " - " + str.tostring(b.get_top(), format.mintick) + " | touches " + str.tostring(z.touches) + (z.retired ? " | no trade" : z.rr ? " | retest of a higher zone" : "") : (slot == 3 ? nm2 : ""))
     shown_boxes
 
 // The nearest zone of one side: the closest box above price for supply, below price for demand (a box that
@@ -1117,6 +1130,7 @@ process_slot(0, mode_d, show_d, sup_d, dem_d, d_sf, d_st, d_sb, d_stm, d_sn, d_s
 process_slot(1, mode_w, show_w, sup_w, dem_w, w_sf, w_st, w_sb, w_stm, w_sn, w_si, w_df, w_dt, w_db, w_dtm, w_dn, w_di, w_c, w_h, w_l, w_a, w_sf_a, w_st_a, w_sb_a, w_stm_a, w_sn_a, w_si_a, w_df_a, w_dt_a, w_db_a, w_dtm_a, w_dn_a, w_di_a, w_c_a, w_h_a, w_l_a, w_a_a, w_stn, w_st0, w_st1, w_stx, w_dtn, w_dt0, w_dt1, w_dtx, w_sg, w_dg, w_sg_a, w_dg_a, w_so, w_do, w_so_a, w_do_a, w_sm, w_dm, w_sm_a, w_dm_a, new_w)
 // the High timeframe has its own lower-tf arrays: on intraday styles it can sit below the chart (a 4H High on a Daily chart)
 process_slot(2, mode_m, show_m, sup_m, dem_m, m_sf, m_st, m_sb, m_stm, m_sn, m_si, m_df, m_dt, m_db, m_dtm, m_dn, m_di, m_c, m_h, m_l, m_a, m_sf_a, m_st_a, m_sb_a, m_stm_a, m_sn_a, m_si_a, m_df_a, m_dt_a, m_db_a, m_dtm_a, m_dn_a, m_di_a, m_c_a, m_h_a, m_l_a, m_a_a, m_stn, m_st0, m_st1, m_stx, m_dtn, m_dt0, m_dt1, m_dtx, m_sg, m_dg, m_sg_a, m_dg_a, m_so, m_do, m_so_a, m_do_a, m_sm, m_dm, m_sm_a, m_dm_a, new_m)
+process_slot(3, 0, show_c, sup_c, dem_c, c_sf, c_st, c_sb, c_stm, c_sn, c_si, c_df, c_dt, c_db, c_dtm, c_dn, c_di, c_c, c_h, c_l, c_a, d_sf_a, d_st_a, d_sb_a, d_stm_a, d_sn_a, d_si_a, d_df_a, d_dt_a, d_db_a, d_dtm_a, d_dn_a, d_di_a, d_c_a, d_h_a, d_l_a, d_a_a, c_stn, c_st0, c_st1, c_stx, c_dtn, c_dt0, c_dt1, c_dtx, c_sg, c_dg, d_sg_a, d_dg_a, c_so, c_do, d_so_a, d_do_a, c_sm, c_dm, d_sm_a, d_dm_a, true)
 
 //-----------------------------------------------------------------------------
 // MINOR ZONES (chart timeframe, warning only)
@@ -1199,6 +1213,8 @@ if barstate.islast
     dem_w.size_all(1, future_time)
     sup_m.size_all(2, future_time)
     dem_m.size_all(2, future_time)
+    sup_c.size_all(3, future_time)
+    dem_c.size_all(3, future_time)
     while tgt_labels.size() > 0
         tgt_labels.pop().delete()
     tgt_zones.clear()
@@ -1255,6 +1271,11 @@ if barstate.islast
     if anchor_slot != 2
         refresh(sup_m, true, 2, false, a_s, corr_only)
         refresh(dem_m, false, 2, false, a_d, corr_only)
+    // the chart's own timeframe, when the style does not include it: drawn as levels after the style's timeframes (a
+    // box with the same edges as a style timeframe box is left to that box), never a target
+    if show_c
+        refresh(sup_c, true, 3, false, a_s, false)
+        refresh(dem_c, false, 3, false, a_d, false)
 
 //-----------------------------------------------------------------------------
 // TREND STATE
@@ -1457,7 +1478,7 @@ ema_conf(Zone z, bool is_supply) =>
 // on top of the fresh touches; on 5m zones the Exit entries lost, which One And Done already rules out.
 // A visit is live while price is in the zone, or on the zone timeframe candle right after the one that closed back out.
 visit_live(Zone z) =>
-    int ms = timeframe.in_seconds(z.slot == 0 ? TF0 : z.slot == 1 ? TF1 : TF2) * 1000
+    int ms = timeframe.in_seconds(slot_tf(z.slot)) * 1000
     z.inside or (not na(z.x_t) and time - z.x_t <= ms)
 
 // Purity the sheet's way, counting only the visits before the one being traded: the latest visit when latest is true,
@@ -1472,7 +1493,7 @@ entry_type(int pur, int s_trend) =>
 
 // One And Done: a zone under 1 hour that has had its touch takes no second entry (0 = none)
 used_up(Zone z) =>
-    one_done and timeframe.in_seconds(z.slot == 0 ? TF0 : z.slot == 1 ? TF1 : TF2) < 3600 and z.touches >= 1 and not z.inside
+    one_done and timeframe.in_seconds(slot_tf(z.slot)) < 3600 and z.touches >= 1 and not z.inside
 
 entry_name(int et) =>
     et == 1 ? "TOUCH ENTRY" : et == 2 ? "ZONE ENTRY" : "EXIT ENTRY"
@@ -1482,7 +1503,7 @@ entry_hint(Zone z, bool is_supply, int et, int pur, int s_trend) =>
     float near = is_supply ? z.b.get_bottom() : z.b.get_top()
     float far = is_supply ? z.b.get_top() : z.b.get_bottom()
     string side = is_supply ? "sell" : "buy"
-    string tf = tf_name(z.slot == 0 ? TF0 : z.slot == 1 ? TF1 : TF2)
+    string tf = tf_name(slot_tf(z.slot))
     string stop = "stop just past " + str.tostring(far, format.mintick)
     et == 0 ? "HOW: no trade here. Zones under 1 hour are one and done and this one has had its touch; it is removed when price comes back." :
      et == 1 ? "HOW (touch entry, fresh zone, purity 4): set a " + side + " limit at " + str.tostring(near, format.mintick) + ", " + stop + ". It fills the moment price comes back. Only take it on a zone that scores well." :
@@ -1670,10 +1691,10 @@ score_zone(Zone z, bool is_supply, float r_top, float r_btm, box opp, string opp
 // a zone whose timing is right but whose EMA signal is not with it waits for the EMA
 entry_state(Zone z, int total, int ema_n, int slot, int et) =>
     bool valid = total >= go_min
-    string tf = tf_name(slot == 0 ? TF0 : slot == 1 ? TF1 : TF2)
+    string tf = tf_name(slot_tf(slot))
     // the gap-away entry is taken right after the gap: it is live for the first two candles of the zone's timeframe after
     // the zone is confirmed. Later, with price long gone, the zone waits for its retest like any other
-    int gap_ms = timeframe.in_seconds(slot == 0 ? TF0 : slot == 1 ? TF1 : TF2) * 1000 * 2
+    int gap_ms = timeframe.in_seconds(slot_tf(slot)) * 1000 * 2
     bool gap_live = z.gap_out and z.touches == 0 and not na(z.ct) and time - z.ct <= gap_ms
     bool timing = et == 0 ? false : et == 1 ? (z.inside or gap_live) : et == 2 ? (z.inside and not na(z.zc_t)) : (not z.inside and visit_live(z))
     bool ema_ok = not ema_need or ema_n == 1

@@ -234,6 +234,13 @@ detect(bool is_supply, int k, float yard) =>
     bool gap_full = is_supply ? open[k] < low[k + 1] - min_gap : open[k] > high[k + 1] + min_gap
     // a candle closing back toward the base adds nothing: only the gap itself can drive then
     float drive = away ? body + nz(gap_in) : nz(gap_in)
+    // a candle a little under the size rule still drives when price clearly left the base: it closes past the whole
+    // range of the candle before it (wick included) and the move from that candle's body to this close is an impulse
+    // in size. Chop that stays inside the base candle's range never qualifies
+    float move_out = is_supply ? prev_top - close[k] : close[k] - prev_btm
+    bool cleared = is_supply ? close[k] < low[k + 1] : close[k] > high[k + 1]
+    if away and drive < lim and cleared and move_out >= lim
+        drive := move_out
     if not na(body) and drive >= lim and (away or gap_imp)
         float base_lim = drive * base_mult
         float a_lo = na   // full range of the base so far (wicks)
@@ -927,7 +934,9 @@ flag_reactions(array<Zone> zs, bool is_supply, int slot) =>
                 if hz.size() > 0 and h > 0
                     for q = 0 to hz.size() - 1
                         Zone oz = hz.get(q)
-                        if not (s2 == slot and q == i)
+                        // on the entry timeframe a new base on an older zone of its own timeframe is the new zone (the
+                        // newest base is the one traded, see superseded); only a higher timeframe zone makes it a reaction
+                        if not (s2 == slot and (q == i or slot == 0))
                             float ov = math.min(z.b.get_top(), oz.b.get_top()) - math.max(z.b.get_bottom(), oz.b.get_bottom())
                             if not na(oz.it) and oz.lt < z.lt and oz.it + tf_ms <= z.lt and ov >= 0.5 * h
                                 hit := true
@@ -935,6 +944,23 @@ flag_reactions(array<Zone> zs, bool is_supply, int slot) =>
                 if hit
                     break
             z.rr := hit
+
+// Entry timeframe only: true when a newer base of the same side formed on this zone (half of the newer zone inside it).
+// Price came back to the older zone and based again, so the newer zone is the one traded and drawn; the older one is
+// hidden and is never a target (one outline per area, the newest base wins)
+superseded(array<Zone> zs, int i) =>
+    bool hit = false
+    Zone z = zs.get(i)
+    if zs.size() > 1
+        for q = 0 to zs.size() - 1
+            Zone oz = zs.get(q)
+            float h = oz.b.get_top() - oz.b.get_bottom()
+            if q != i and oz.lt > z.lt and h > 0
+                float ov = math.min(z.b.get_top(), oz.b.get_top()) - math.max(z.b.get_bottom(), oz.b.get_bottom())
+                if ov >= 0.5 * h
+                    hit := true
+                    break
+    hit
 
 // True when a drawn zone of a lower timeframe slot covers the same price range (each edge within a tenth of the height): the
 // higher timeframe zone was read from that base, so drawing both stacks two boxes on one level. The lower one is drawn
@@ -969,7 +995,7 @@ refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<bo
             if use_filter and not anchors.overlaps_any(b.get_top(), b.get_bottom())
                 d := na
             // a retired zone is never one of the nearest (it is not tradable); it is drawn faint below
-            if zones.get(i).retired or zones.get(i).rr
+            if zones.get(i).retired or zones.get(i).rr or (slot == 0 and superseded(zones, i))
                 d := na
             // under 1 hour with One And Done, a zone that has had its touch and price has left is not tradable, so it is
             // not a target either (a zone price is in right now stays, so a trade in progress keeps its label)
@@ -1032,24 +1058,11 @@ refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<bo
                 box b = z.b
                 float gap = b.get_bottom() > close ? b.get_bottom() - close : b.get_top() < close ? close - b.get_top() : 0.0
                 bool near = na(reach) or gap <= reach
-                // one outline per area on the Low timeframe (where chop stacks them): a dashed zone mostly inside an older
-                // zone of this timeframe, or inside a higher timeframe zone, is left to that zone's outline. On the Mid and
-                // High timeframes every retest base still shows, since the newest base is the level watched there
-                bool covered = false
-                float hb = b.get_top() - b.get_bottom()
-                if slot == 0
-                    for s2 = slot to 2
-                        array<Zone> cz = s2 == 0 ? (is_supply ? sup_d : dem_d) : s2 == 1 ? (is_supply ? sup_w : dem_w) : (is_supply ? sup_m : dem_m)
-                        if cz.size() > 0 and hb > 0
-                            for q = 0 to cz.size() - 1
-                                Zone oz = cz.get(q)
-                                if not (s2 == slot and q == i) and (s2 > slot or oz.lt < z.lt)
-                                    float ov = math.min(b.get_top(), oz.b.get_top()) - math.max(b.get_bottom(), oz.b.get_bottom())
-                                    if ov >= 0.5 * hb
-                                        covered := true
-                                        break
-                        if covered
-                            break
+                // one outline per area on the Low timeframe (where chop stacks them): a dashed zone with a newer base of this
+                // timeframe on it is left to that newer zone. A Low timeframe zone inside a higher timeframe zone still shows:
+                // the entry timeframe's own edges are the ones traded. On the Mid and High timeframes every retest base still
+                // shows, since the newest base is the level watched there
+                bool covered = slot == 0 and superseded(zones, i)
                 if near and not covered and not shown_flag.get(i) and not (use_filter and not anchors.overlaps_any(b.get_top(), b.get_bottom())) and not dup_lower(slot, is_supply, b, false)
                     // outline only, bright green for demand and red for supply, so old zones read apart from the drawn ones
                     b.set_bgcolor(color.new(base, 100))

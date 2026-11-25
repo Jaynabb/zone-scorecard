@@ -972,6 +972,10 @@ refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<bo
             // a retired zone is never one of the nearest (it is not tradable); it is drawn faint below
             if zones.get(i).retired or zones.get(i).rr
                 d := na
+            // under 1 hour with One And Done, a zone that has had its touch and price has left is not tradable, so it is
+            // not a target either (a zone price is in right now stays, so a trade in progress keeps its label)
+            if one_done and timeframe.in_seconds(slot == 0 ? TF0 : slot == 1 ? TF1 : TF2) < 3600 and zones.get(i).touches >= 1 and not zones.get(i).inside
+                d := na
             dist.set(i, d)
             b.set_bgcolor(color.new(base, 100))
             b.set_border_color(color.new(base, 100))
@@ -1029,7 +1033,23 @@ refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<bo
                 box b = z.b
                 float gap = b.get_bottom() > close ? b.get_bottom() - close : b.get_top() < close ? close - b.get_top() : 0.0
                 bool near = na(reach) or gap <= reach
-                if near and not shown_flag.get(i) and not (use_filter and not anchors.overlaps_any(b.get_top(), b.get_bottom())) and not dup_lower(slot, is_supply, b, false)
+                // one outline per area: a dashed zone mostly inside an older zone of this timeframe, or inside a higher
+                // timeframe zone, is left to that zone's outline
+                bool covered = false
+                float hb = b.get_top() - b.get_bottom()
+                for s2 = slot to 2
+                    array<Zone> cz = s2 == 0 ? (is_supply ? sup_d : dem_d) : s2 == 1 ? (is_supply ? sup_w : dem_w) : (is_supply ? sup_m : dem_m)
+                    if cz.size() > 0 and hb > 0
+                        for q = 0 to cz.size() - 1
+                            Zone oz = cz.get(q)
+                            if not (s2 == slot and q == i) and (s2 > slot or oz.lt < z.lt)
+                                float ov = math.min(b.get_top(), oz.b.get_top()) - math.max(b.get_bottom(), oz.b.get_bottom())
+                                if ov >= 0.5 * hb
+                                    covered := true
+                                    break
+                    if covered
+                        break
+                if near and not covered and not shown_flag.get(i) and not (use_filter and not anchors.overlaps_any(b.get_top(), b.get_bottom())) and not dup_lower(slot, is_supply, b, false)
                     // outline only, bright green for demand and red for supply, so old zones read apart from the drawn ones
                     b.set_bgcolor(color.new(base, 100))
                     b.set_border_color(is_supply ? color.new(#FF5252, 25) : color.new(#2ECC71, 25))

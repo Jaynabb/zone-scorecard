@@ -1056,9 +1056,7 @@ refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<bo
             b.set_border_style(line.style_solid)
             string side_nm = nm + (is_supply ? " SUPPLY" : " DEMAND")
             string info = side_nm + " " + str.tostring(b.get_bottom(), format.mintick) + " - " + str.tostring(b.get_top(), format.mintick) + " | base " + str.tostring(z.base_n) + " | " + str.format_time(z.lt, "yyyy-MM-dd") + (z.gap ? " | gap refined" : "") + (z.via_lower ? " | base read below" + (na(z.chk) ? "" : (is_supply ? " | highest close since base " : " | lowest close since base ") + str.tostring(z.chk, format.mintick)) : "")
-            // a chart timeframe zone outside the trading style always names its timeframe, so it reads apart from the
-            // style's Low timeframe zones that share its colors
-            b.set_text(show_zone_info ? info : (is_target or (label_targets_only and slot != 3) ? "" : side_nm))
+            b.set_text(show_zone_info ? info : (is_target or label_targets_only ? "" : side_nm))
             if is_target
                 b.set_border_color(highlight_color)
                 b.set_border_width(3)
@@ -1106,7 +1104,7 @@ refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<bo
                     drawn_k.push(slot * 2 + (is_supply ? 0 : 1))
                     drawn_full.push(false)
                     string nm2 = nm + (is_supply ? " SUPPLY" : " DEMAND")
-                    b.set_text(show_zone_info ? nm2 + " " + str.tostring(b.get_bottom(), format.mintick) + " - " + str.tostring(b.get_top(), format.mintick) + " | touches " + str.tostring(z.touches) + (z.retired ? " | no trade" : z.rr ? " | retest of a higher zone" : "") : (slot == 3 ? nm2 : ""))
+                    b.set_text(show_zone_info ? nm2 + " " + str.tostring(b.get_bottom(), format.mintick) + " - " + str.tostring(b.get_top(), format.mintick) + " | touches " + str.tostring(z.touches) + (z.retired ? " | no trade" : z.rr ? " | retest of a higher zone" : "") : "")
     shown_boxes
 
 // The nearest zone of one side: the closest box above price for supply, below price for demand (a box that
@@ -1271,9 +1269,18 @@ if barstate.islast
     if anchor_slot != 2
         refresh(sup_m, true, 2, false, a_s, corr_only)
         refresh(dem_m, false, 2, false, a_d, corr_only)
-    // the chart's own timeframe, when the style does not include it: drawn as levels after the style's timeframes (a
-    // box with the same edges as a style timeframe box is left to that box), never a target
+    // A chart timeframe the style does not include shows only its own zones, for drilling down: the style's boxes are
+    // hidden there (their targets were still picked above, so the score labels and the trend table stay). Never a target
     if show_c
+        sup_d.hide_all(true, 0)
+        dem_d.hide_all(false, 0)
+        sup_w.hide_all(true, 1)
+        dem_w.hide_all(false, 1)
+        sup_m.hide_all(true, 2)
+        dem_m.hide_all(false, 2)
+        drawn_b.clear()
+        drawn_k.clear()
+        drawn_full.clear()
         refresh(sup_c, true, 3, false, a_s, false)
         refresh(dem_c, false, 3, false, a_d, false)
 

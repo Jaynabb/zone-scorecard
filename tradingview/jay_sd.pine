@@ -40,7 +40,7 @@ int max_zones = input.int(60, 'Max Zones Kept Per Timeframe', minval=2, maxval=8
 int typ_len = input.int(20, 'Typical Body Lookback', minval=5, group=poi_group, tooltip='Number of candles used to measure the typical candle body (the median, so a few crash candles do not distort it). Every size rule below is a multiple of this typical body, so the script scales itself to any market and timeframe.')
 float impulse_mult = input.float(1.0, 'Impulse Min Body (x typical body)', minval=0.25, step=0.25, group=poi_group, tooltip='Floor for an impulse candle: its body must be at least this many typical bodies and move away from the base. The real test is relative: every base candle must be small compared with the impulse, see Base Candle Max.')
 float base_mult = input.float(0.5, 'Base Candle Max (x impulse body)', minval=0.1, maxval=1.0, step=0.1, group=poi_group, tooltip='A candle counts as part of the base if its body is at most this fraction of the impulse body (0.5 means the impulse is at least twice every base candle), or if it is a balance candle: body at most half its own range.')
-int base_max = input.int(10, 'Max Base Candles', minval=1, maxval=20, group=poi_group, tooltip='The base is the run of small candles immediately left of the impulse (a pause can run many candles). Each one must share price with the base so far, so the walk stops where the pause started. Supply zone = base wick high to lowest base body. Demand zone = base wick low to highest base body. On a base of two or more candles, a wick that spikes far beyond the bodies (more than half the base body height, or half a typical body) is a liquidity spike and does not set the far edge.')
+int base_max = input.int(10, 'Max Base Candles', minval=1, maxval=20, group=poi_group, tooltip='The base is the run of small candles immediately left of the impulse (a pause can run many candles). Each one must share price with the base so far, so the walk stops where the pause started. Supply zone = base wick high to lowest base body. Demand zone = base wick low to highest base body. On a base of two or more candles, a wick that reaches far beyond the base\'s other wicks (over three times their typical reach past the bodies) is a liquidity spike and does not set the far edge.')
 float box_width = input.float(1.0, 'Fallback Zone Width (x typical body)', step=0.25, group=poi_group, tooltip='Only used when the base has no height, for example a single doji with no wick.')
 int zz_len = input.int(10, 'Zig Zag Swing Length', minval=1, group=poi_group, tooltip='A swing high must be the highest high of this many candles to its left (mirror for lows). Used by the zig zag and the trend readout.')
 int zz_right = input.int(2, 'Swing Confirmation Bars', minval=1, group=poi_group, tooltip='How many candles must close after an extreme before it counts as a swing. Small keeps the swings and the trend readout current; large makes them more certain.')
@@ -305,9 +305,9 @@ detect(bool is_supply, int k, float yard) =>
             if arrival and turn_j < legs + cnt
                 cnt := turn_j - legs
                 lt := time[o3]
-        // Spike wicks: on a base of two or more candles, the far edge is the most extreme wick that stays near the bodies
-        // (within half the base body height, or half a typical body). A wick far beyond the bodies is a liquidity spike
-        // inside the pause, not where the zone ends; the wick to body rule still holds for the wicks that remain.
+        // Spike wicks: on a base of two or more candles, the far edge is the most extreme wick that is not a spike (see
+        // below). A spike is a liquidity grab inside the pause, not where the zone ends; the wick to body rule still holds
+        // for the wicks that remain.
         // The near edge is the most extreme body (wick to body)
         if cnt >= 1
             float b_lo = na
@@ -320,7 +320,14 @@ detect(bool is_supply, int k, float yard) =>
                 w_ext := is_supply ? (na(w_ext) ? high[o2] : math.max(w_ext, high[o2])) : (na(w_ext) ? low[o2] : math.min(w_ext, low[o2]))
             float far = w_ext
             if cnt >= 2
-                float thr = 0.5 * math.max(b_hi - b_lo, yard)
+                // a wick is a spike only when it reaches far beyond the base's other wicks: more than three times their
+                // typical (median) reach past the bodies, and at least a quarter of the base height. When every candle
+                // in the base has a long wick, the wicks are the zone
+                array<float> reach = array.new<float>()
+                for j2 = legs + 1 to legs + cnt
+                    int o2 = k + j2
+                    reach.push(math.max(is_supply ? high[o2] - b_hi : b_lo - low[o2], 0.0))
+                float thr = math.max(3 * reach.median(), 0.25 * math.max(b_hi - b_lo, yard))
                 far := na
                 for j2 = legs + 1 to legs + cnt
                     int o2 = k + j2

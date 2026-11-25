@@ -41,7 +41,8 @@ def detect(sup, idx, base_max=10, base_mult=0.5):
     wext=max(H[idx-j] for j in js) if sup else min(L[idx-j] for j in js)
     far=wext
     if cnt>=2:
-        thr=0.5*max(bhi-blo,yard); cand=[ (H[idx-j] if sup else L[idx-j]) for j in js if ((H[idx-j]-bhi) if sup else (blo-L[idx-j]))<=thr]
+        reach=[max((H[idx-j]-bhi) if sup else (blo-L[idx-j]),0) for j in js]
+        thr=max(3*statistics.median(reach),0.25*max(bhi-blo,yard)); cand=[ (H[idx-j] if sup else L[idx-j]) for j in js if ((H[idx-j]-bhi) if sup else (blo-L[idx-j]))<=thr]
         far=(max(cand) if sup else min(cand)) if cand else (bhi if sup else blo)
     top,btm=(far,blo) if sup else (bhi,far)
     return f"legs {legs} base {[T[idx-j] for j in js]} zone {btm:.2f}-{top:.2f}"

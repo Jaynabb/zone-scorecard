@@ -72,8 +72,9 @@ bool show_ema = input.bool(true, 'Show EMAs', group=ema_group, tooltip='Draws th
 int ema_fast_len = input.int(9, 'Fast / Mid / Slow EMA', minval=1, group=ema_group, inline='ema', tooltip='Backtested 2026-11-22 on EURUSD, GBPUSD, gold, BTC and NQ: 9 / 21 / 50 on the Daily chart gave the best results for the full candle rule (about 59% win rate at 1:1 and +0.25R per trade at 1:2, against about breakeven for random entries). The edge was small on 1H and none on 5m.')
 int ema_slow_len = input.int(21, '', minval=1, group=ema_group, inline='ema')
 int ema_long_len = input.int(50, '', minval=1, group=ema_group, inline='ema')
-string ema_rule = input.string('Close beyond fast EMA', 'EMA Flip Rule', options=['Close beyond fast EMA', 'Full candle beyond all 3'], group=ema_group, tooltip='Close beyond fast EMA: a candle closing below the fast EMA flips the signal to SELL, a close above it flips it to BUY. Catches trend changes early but flips more often. Full candle beyond all 3: the whole candle, wicks included, must sit beyond all three EMAs (slower, fewer flips; the version backtested on 2026-11-22).')
+string ema_rule = input.string('Full candle beyond fast EMA', 'EMA Flip Rule', options=['Full candle beyond fast EMA', 'Close beyond fast EMA', 'Full candle beyond all 3'], group=ema_group, tooltip='Full candle beyond fast EMA: the whole candle, wicks included, must sit above the fast EMA to flip the signal to BUY, or below it to flip to SELL. Close beyond fast EMA: a close on the other side of the fast EMA is enough (earlier, flips more often). Full candle beyond all 3: the whole candle must sit beyond all three EMAs (slowest, the version backtested on 2026-11-22).')
 bool ema_fast_rule = ema_rule == 'Close beyond fast EMA'
+bool ema_full_fast = ema_rule == 'Full candle beyond fast EMA'
 bool ema_required = input.bool(true, 'Require EMA Agreement For GO', group=ema_group, tooltip='On: a target zone is only a GO when the standing EMA signal points its way (buy for demand, sell for supply). Otherwise the label says WAIT FOR EMA. Only applies when the Low timeframe is under 1 hour (Scalping): backtests on 1H and 4H showed the EMA filter there skipped trades that did better than the ones it kept.')
 bool show_ema_sig = input.bool(true, 'Mark EMA Buy / Sell Candles', group=ema_group, tooltip='A small triangle under the candle that flips the EMA signal to BUY and over the candle that flips it to SELL, by the EMA Flip Rule.')
 bool show_exit = input.bool(true, '9 EMA Exit On Target Zones', group=ema_group, tooltip="Trade management after the first retest of a Low timeframe target zone (entry at the near edge, stop at the far edge): at +1R move the stop to breakeven, then exit on the first Low timeframe candle that closes back across the fast EMA. Backtested 2026-11-23 on 5m: +0.14R per trade against -0.05R for a fixed 2R target, and better than fixed 2R in 13 of 15 symbol and timeframe tests. Shown as a TRADE line on the target label with BE and EXIT markers on the chart.")
@@ -1503,8 +1504,8 @@ ema_pack(int off) =>
     float ef = ta.ema(close, ema_fast_len)
     float es = ta.ema(close, ema_slow_len)
     float el = ta.ema(close, ema_long_len)
-    bool up = ema_fast_rule ? close > ef : low > math.max(ef, es, el)
-    bool dn = ema_fast_rule ? close < ef : high < math.min(ef, es, el)
+    bool up = ema_full_fast ? low > ef : ema_fast_rule ? close > ef : low > math.max(ef, es, el)
+    bool dn = ema_full_fast ? high < ef : ema_fast_rule ? close < ef : high < math.min(ef, es, el)
     var int sig = 0
     var int since = 0
     since += 1
@@ -1546,7 +1547,7 @@ alertcondition(ema_sell, 'EMA sell candle', '{{ticker}}: EMA signal flipped to S
 
 ema_sig_s() =>
     string lens = str.tostring(ema_fast_len) + "/" + str.tostring(ema_slow_len) + "/" + str.tostring(ema_long_len)
-    string how = ema_fast_rule ? "close " + (ema_sig == 1 ? "above " : "below ") + str.tostring(ema_fast_len) + " EMA" : "full candle " + (ema_sig == 1 ? "above " : "below ") + lens
+    string how = ema_full_fast ? "full candle " + (ema_sig == 1 ? "above " : "below ") + str.tostring(ema_fast_len) + " EMA" : ema_fast_rule ? "close " + (ema_sig == 1 ? "above " : "below ") + str.tostring(ema_fast_len) + " EMA" : "full candle " + (ema_sig == 1 ? "above " : "below ") + lens
     ema_sig == 0 ? "no signal yet" : (ema_sig == 1 ? "BUY" : "SELL") + " (" + how + ", " + str.tostring(ema_since) + " " + tf_name(TF0) + " bars ago)"
 
 // returns 1 when the standing signal points the zone's way, -1 when it points against it, 0 with no signal, and the label line

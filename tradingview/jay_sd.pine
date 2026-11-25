@@ -347,6 +347,9 @@ detect(bool is_supply, int k, float yard) =>
                         break
                     float b4_hi = math.max(open[o4], close[o4])
                     float b4_lo = math.min(open[o4], close[o4])
+                    // a full size candle is a move (in or out), never base
+                    if b4_hi - b4_lo > 1.5 * yard
+                        break
                     bool deeper = is_supply ? b4_hi > tb_hi : b4_lo < tb_lo
                     bool level = is_supply ? b4_lo >= lvl : b4_hi <= lvl
                     if deeper and level
@@ -378,7 +381,7 @@ detect(bool is_supply, int k, float yard) =>
                     rb_lo := na(rb_lo) ? math.min(open[k + jj], close[k + jj]) : math.min(rb_lo, math.min(open[k + jj], close[k + jj]))
                 while j_near - 1 >= legs + 1
                     int o4 = k + j_near - 1
-                    if math.max(open[o4], close[o4]) > rb_hi or math.min(open[o4], close[o4]) < rb_lo
+                    if math.max(open[o4], close[o4]) > rb_hi + 0.25 * yard or math.min(open[o4], close[o4]) < rb_lo - 0.25 * yard
                         break
                     j_near -= 1
                 // candles between the extreme and an older one that the new level leaves out are trimmed from the far side

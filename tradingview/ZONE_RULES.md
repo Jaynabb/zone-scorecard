@@ -56,3 +56,8 @@ Examples: USOIL 5M 81.26-81.36 (base 06:05-06:10; 06:15 to 07:00 is the move up)
 ## Open questions
 
 - **V-top with no small base** (BTC 5M 10:00, a full size rally candle that price turned down from): how to mark it.
+- **BTC 5M older supply, Jay 58746-58836 (base 05:55-06:15, leg in 05:50, leg out 06:20-06:30, retested at 08:25 for a
+  1,600 point drop):** not drawn by the indicator. The base candles (bodies 45-91) are more than half the first
+  leg-out candle (06:20, body 129), so the base walk stops at 06:10. The leg out is really three candles (06:20 to
+  06:30, about 390 points). Letting base candles reach 1.5 typical bodies found it but broke USOIL 5M 81.57-81.64,
+  so it was reverted. Next idea: measure the leg out over its run of candles instead of the first candle alone.

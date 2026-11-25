@@ -354,13 +354,18 @@ detect(bool is_supply, int k, float yard) =>
                 far := na(far) ? (is_supply ? b_hi : b_lo) : far
             z_top := is_supply ? far : b_hi
             z_btm := is_supply ? b_lo : far
-            // a one candle doji base (body at most a quarter of its range): its body is no edge, so the zone runs from the
-            // wick on the impulse side to the body's far side (supply: low up to the top of the body; demand: high down to
-            // the bottom of the body), the way the trader marks it
+            // a one candle doji base (body at most a quarter of its range) is wick to body like any base, unless its wick on
+            // the zone's far side (supply: upper, demand: lower) is tiny (a quarter of the range or less) and the other
+            // wick is longer: the body and a stub are no zone, so it runs from the long wick to the body's far side
+            // (supply: low up to the top of the body; demand: high down to the bottom of the body), the way the trader marks it
             if cnt == 1
                 int od = k + legs + 1
                 float rgd = high[od] - low[od]
-                if rgd > 0 and math.abs(close[od] - open[od]) <= 0.25 * rgd
+                float up_w = high[od] - math.max(open[od], close[od])
+                float dn_w = math.min(open[od], close[od]) - low[od]
+                float far_w = is_supply ? up_w : dn_w
+                float near_w = is_supply ? dn_w : up_w
+                if rgd > 0 and math.abs(close[od] - open[od]) <= 0.25 * rgd and far_w <= 0.25 * rgd and near_w > far_w
                     z_top := is_supply ? math.max(open[od], close[od]) : high[od]
                     z_btm := is_supply ? low[od] : math.min(open[od], close[od])
         // V-shaped turn: no small base, but the candle next to the impulse holds the extreme.
@@ -570,15 +575,18 @@ mark_target(int slot, bool is_supply, Zone z, string tag, string extra, string s
     label l = label.new(bar_index + 6, mid, zone_text(slot, is_supply, z, tag, extra, status), xloc=xloc.bar_index, style=label.style_label_left, color=go ? go_color : highlight_color, textcolor=color.black, size=size.small)
     tgt_labels.push(l)
 
-// When the list is full, forget a retired zone first (oldest first), and only then the oldest zone, so old supply and
-// demand price never came back to stays on the chart as long as possible
+// When the list is full, forget the zone farthest from price: the zones near price are the ones in play, whether fresh,
+// touched or past their touches, and a valid zone close to price must never be dropped for an old one far away
 method trim(array<Zone> zones, int limit) =>
     while zones.size() > limit
         int drop = zones.size() - 1
-        for i = zones.size() - 1 to 0
-            if zones.get(i).retired
+        float far_d = -1.0
+        for i = 0 to zones.size() - 1
+            box zb = zones.get(i).b
+            float d = math.max(zb.get_bottom() - close, close - zb.get_top(), 0.0)
+            if d > far_d
+                far_d := d
                 drop := i
-                break
         Zone z = zones.remove(drop)
         z.b.delete()
 
@@ -965,7 +973,9 @@ superseded(array<Zone> zs, int i) =>
         for q = 0 to zs.size() - 1
             Zone oz = zs.get(q)
             float h = oz.b.get_top() - oz.b.get_bottom()
-            if q != i and oz.lt > z.lt and h > 0
+            // a newer base that is itself a retest reaction of a higher timeframe zone, or past its touches, is not drawn
+            // as a zone, so it does not take the older zone's place
+            if q != i and oz.lt > z.lt and h > 0 and not oz.rr and not oz.retired
                 float ov = math.min(z.b.get_top(), oz.b.get_top()) - math.max(z.b.get_bottom(), oz.b.get_bottom())
                 if ov >= 0.5 * h
                     hit := true

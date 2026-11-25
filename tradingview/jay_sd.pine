@@ -1509,6 +1509,8 @@ trend_line(string nm, int st, float cp, float sh1, float sh2, float sl1, float s
 [l_st, l_cp, l_sh1, l_sh2, l_sl1, l_sl2, l_cons] = request.security(syminfo.tickerid, TF0, trend_pack(), lookahead=timeframe.in_seconds(TF0) > chart_sec ? barmerge.lookahead_on : barmerge.lookahead_off)
 // the High timeframe trend, shown above the others for the bigger picture (not scored)
 [ht_st, ht_cp, ht_sh1, ht_sh2, ht_sl1, ht_sl2, ht_cons] = request.security(syminfo.tickerid, TF2, trend_pack(), lookahead=timeframe.in_seconds(TF2) > chart_sec ? barmerge.lookahead_on : barmerge.lookahead_off)
+// the chart's own timeframe trend, shown when the chart is not one of the style's timeframes (not scored)
+[c_tst, c_tcp, c_tsh1, c_tsh2, c_tsl1, c_tsl2, c_tcons] = request.security(syminfo.tickerid, timeframe.period, trend_pack())
 // the High timeframe fib range, scored by the Range check
 [fib_hi, fib_lo, fib_hi_t, fib_lo_t] = request.security(syminfo.tickerid, TF2, fib_pack(), lookahead=timeframe.in_seconds(TF2) > chart_sec ? barmerge.lookahead_on : barmerge.lookahead_off)
 
@@ -1687,7 +1689,7 @@ trade_marks(bool is_supply, int state, int k1, int ke, float r_end) =>
         string t = state == 3 ? "EXIT " + (r_end >= 0 ? "+" : "") + str.tostring(r_end, "#.#") + "R" : state == 4 ? "STOP -1R" : "BE 0R"
         tgt_labels.push(label.new(bar_index - ke, is_supply ? high[ke] : low[ke], t, style=is_supply ? label.style_label_down : label.style_label_up, color=color.new(color.white, 100), textcolor=state == 3 and r_end > 0 ? color.new(#2ECC71, 0) : color.new(#FF6B6B, 0), size=size.small))
 
-var table trend_box = table.new(position.top_right, 1, 5, bgcolor=color.new(color.black, 25), border_width=1, border_color=color.new(color.white, 60))
+var table trend_box = table.new(position.top_right, 1, 6, bgcolor=color.new(color.black, 25), border_width=1, border_color=color.new(color.white, 60))
 if barstate.islast and show_trend
     if timeframe.in_seconds(TF2) != timeframe.in_seconds(trend_tf)
         trend_box.cell(0, 0, trend_line(tf_name(TF2), ht_st, ht_cp, ht_sh1, ht_sh2, ht_sl1, ht_sl2, ht_cons), text_color=color.new(color.white, 15), text_size=size.small, text_halign=text.align_left)
@@ -1699,9 +1701,13 @@ if barstate.islast and show_trend
     else
         trend_box.cell(0, 2, "", text_size=size.small)
     // the Low timeframe far below the chart (Scalping on a Daily chart) means hundreds of candles per bar: slow and coarse
-    trend_box.cell(0, 3, "EMA SIGNAL: " + ema_sig_s(), text_color=ema_sig == 1 ? color.new(#2ECC71, 10) : ema_sig == -1 ? color.new(#FF6B6B, 10) : color.new(color.white, 30), text_size=size.small, text_halign=text.align_left)
+    if show_c
+        trend_box.cell(0, 3, trend_line(tf_name(timeframe.period), c_tst, c_tcp, c_tsh1, c_tsh2, c_tsl1, c_tsl2, c_tcons), text_color=color.new(color.white, 30), text_size=size.small, text_halign=text.align_left)
+    else
+        trend_box.cell(0, 3, "", text_size=size.small)
+    trend_box.cell(0, 4, "EMA SIGNAL: " + ema_sig_s(), text_color=ema_sig == 1 ? color.new(#2ECC71, 10) : ema_sig == -1 ? color.new(#FF6B6B, 10) : color.new(color.white, 30), text_size=size.small, text_halign=text.align_left)
     if timeframe.in_seconds(TF0) * 100 < chart_sec
-        trend_box.cell(0, 4, "Chart timeframe is far above the Low timeframe (" + tf_name(TF0) + "). Drop the chart to " + tf_name(TF1) + " or lower for reliable zones.", text_color=color.orange, text_size=size.small, text_halign=text.align_left)
+        trend_box.cell(0, 5, "Chart timeframe is far above the Low timeframe (" + tf_name(TF0) + "). Drop the chart to " + tf_name(TF1) + " or lower for reliable zones.", text_color=color.orange, text_size=size.small, text_halign=text.align_left)
 
 //-----------------------------------------------------------------------------
 // SETUP SCORE AND ALERTS

@@ -1,0 +1,18 @@
+# Jay's marked zones: the zone tests every rule change must pass. Times are New York, the base's first candle (approx).
+# symbol,tf,side,base_time,expected_btm,expected_top,tolerance (fraction of the height each edge may be off),note
+USOIL,5m,demand,2026-11-25 06:05,81.26,81.36,0.15,base 06:05-06:10; move up 06:15 on (Jay also said up to 81.46)
+USOIL,5m,demand,2026-11-25 07:00,81.57,81.64,0.15,07:00 doji plain wick to body
+USOIL,5m,demand,2026-11-25 09:00,82.26,82.55,0.15,base 09:00-09:10; impulse 09:15
+USOIL,1h,demand,2026-11-23 23:00,79.57,80.12,0.15,sideways base 23:00-05:00; spike wicks 00:00 and 03:00 left out
+NQ,1h,supply,2026-11-24 16:00,26215.25,26284.25,0.15,16:00 doji with a stub upper wick: low to body top
+ETHUSD,5m,supply,2026-11-24 22:20,1663.89,1668.98,0.15,22:20 base
+ETHUSD,5m,supply,2026-11-24 19:45,1670.16,1674.24,0.15,base 19:45-19:55
+ETHUSD,5m,demand,2026-11-24 21:20,1649.00,1652.04,0.15,21:20 base
+BTCUSD,5m,supply,2026-11-25 08:25,58768.92,58836.54,0.15,08:25 doji; 08:20 leg in; 08:30 leg out
+BTCUSD,5m,supply,2026-11-25 05:55,58711.00,58836.54,0.35,older supply base 05:55-06:15; leg in 05:50; drop 06:20 (Jay drew 58746-58836; any supply there when price returns at 08:10-08:25 is fine)
+BTCUSD,5m,demand,2026-11-25 09:50,57407.59,57666.32,0.15,09:50 base; 09:45 leg in holds the V low (not in zone)
+BTCUSD,5m,demand,2026-11-25 12:10,59048.47,59164.22,0.15,12:10 doji
+BTCUSD,5m,supply,2026-11-25 10:35,58242.00,58597.00,0.15,10:35 doji supply; 10:30 rally in; 10:40 drop out
+BTCUSD,5m,supply,2026-11-25 19:15,60862.95,61476.82,0.15,19:15 spike + 19:20 inside it; 19:25 move out
+USOIL,1M,supply,2026-04-01,101.72,117.63,0.15,Apr 2026 base
+USOIL,1M,demand,2025-12-01,54.98,58.96,0.15,Dec 2025 base

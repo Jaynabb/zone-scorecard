@@ -1924,7 +1924,8 @@ if barstate.islast
     if show_fib and not na(rg_hi) and not na(rg_lo) and rg_hi > rg_lo
         int t0 = math.min(rg_hi_t, rg_lo_t)
         int t1 = time + 5 * timeframe.in_seconds() * 1000
-        for lv in array.from(0.0, 0.25, 0.5, 0.75, 1.0)
+        // Jay's fib: 0, 25, 75 and 100% (no 50% line)
+        for lv in array.from(0.0, 0.25, 0.75, 1.0)
             float p = rg_lo + lv * (rg_hi - rg_lo)
             color col = lv == 1.0 ? color.new(#FF6B6B, 0) : lv == 0.0 ? color.new(#2ECC71, 0) : color.new(#F5C542, 0)
             fib_lines.push(box.new(t0, p, t1, p, xloc=xloc.bar_time, border_color=col, border_width=2, border_style=line.style_solid, bgcolor=color.new(col, 100)))

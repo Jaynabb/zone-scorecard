@@ -90,7 +90,8 @@ Examples: USOIL 5M 81.26-81.36 (base 06:05-06:10; 06:15 to 07:00 is the move up)
 
 ## 6. Newest base wins on the entry timeframe
 
-- When price comes back to an older zone and bases again, the new base is the zone and the older one is hidden.
+- When price comes back to an older zone and bases again, the new base is the target and the older (original) zone stays
+  drawn dashed next to it (v226, Jay: keep the original zone visible).
 - A base that is only a reaction off a higher timeframe zone is not a new zone: that means the base, body side included,
   sits inside the older higher zone. A base whose body is outside it, with only a wick reaching in, is a new zone.
   Example: BTC 5M 19:15 supply 60873-61484 (Jay's), its spike wick into the older 1H supply 61017-61488.

@@ -1087,11 +1087,9 @@ refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<bo
                             origin := true
                             break
                 bool near = na(reach) or gap <= reach or (origin and gap <= 2 * reach)
-                // one outline per area on the Low timeframe (where chop stacks them): a dashed zone with a newer base of this
-                // timeframe on it is left to that newer zone. A Low timeframe zone inside a higher timeframe zone still shows:
-                // the entry timeframe's own edges are the ones traded. On the Mid and High timeframes every retest base still
-                // shows, since the newest base is the level watched there
-                bool covered = (slot == 0 or slot == 3) and superseded(zones, i)
+                // the original zone stays visible when price based again inside it (Jay): the newer base is the target, the
+                // original is drawn dashed next to it while it holds (touch limits above still apply)
+                bool covered = false
                 // a zone price has come back to twice or more is no longer drawn: by the 2nd retest it holds about as
                 // often as a coin flip (overlap_dotted_test.py). Fresh and once-touched zones stay as dashed levels.
                 // Targets are picked above, so the Zone and Exit entries on retested zones are unchanged

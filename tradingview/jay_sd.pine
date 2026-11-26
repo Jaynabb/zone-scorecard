@@ -1836,13 +1836,17 @@ entry_state(Zone z, int total, int ema_n, int slot, int et, int s_trend) =>
     // the zone is confirmed. Later, with price long gone, the zone waits for its retest like any other
     int gap_ms = timeframe.in_seconds(slot_tf(slot)) * 1000 * 2
     bool gap_live = z.gap_out and z.touches == 0 and not na(z.ct) and time - z.ct <= gap_ms
-    bool timing = et == 0 ? false : et == 1 ? (z.inside or gap_live) : et == 2 ? (z.inside and not na(z.zc_t)) : (not z.inside and visit_live(z))
+    // a touch entry is taken on the first candle of the visit only: once a candle of the zone's timeframe has closed inside
+    // the zone, entering is late (second_candle_touch_backtest.py: entering on the 2nd candle -0.21R on 5m and -0.33R on 1H
+    // at 2R, against +0.34R / +0.37R on the 1st). The visit still counts as one touch: later visits do as well either way
+    bool late = et == 1 and z.inside and not na(z.zc_t) and z.zc_t < time
+    bool timing = et == 0 ? false : et == 1 ? ((z.inside and not late) or gap_live) : et == 2 ? (z.inside and not na(z.zc_t)) : (not z.inside and visit_live(z))
     bool ema_ok = et == 1 ? ema_n == 1 : not ema_need or ema_n == 1
     bool go = valid and timing and ema_ok
     string why = et == 2 ? "zone entry, a " + tf + " candle closed inside" : et == 3 ? "exit entry, a " + tf + " candle closed back out" :
          z.inside ? "touch entry, retest now" : "gap away, no retest needed"
     string wait = et == 1 ? "WAIT FOR RETEST (touch entry)" : et == 2 ? (z.inside ? "WAIT FOR A " + tf + " CLOSE INSIDE (zone entry)" : "WAIT FOR PRICE (zone entry)") : (z.inside ? "WAIT FOR A " + tf + " CLOSE BACK OUT (exit entry)" : "WAIT FOR PRICE TO GO IN AND TURN (exit entry)")
-    string st = et == 0 ? "NO (one and done: this " + tf + " zone has had its touch)" : not valid ? (et == 1 ? "NO (touch entry needs the " + tf_name(TF1) + " trend with the zone)" : "NO (score under " + str.tostring(go_min) + ")") : not timing ? wait : not ema_ok ? "WAIT FOR EMA (" + why + ", EMA not with the zone)" : "GO (" + why + ")"
+    string st = et == 0 ? "NO (one and done: this " + tf + " zone has had its touch)" : late and not gap_live ? "NO (late: a " + tf + " candle already closed inside the zone)" : not valid ? (et == 1 ? "NO (touch entry needs the " + tf_name(TF1) + " trend with the zone)" : "NO (score under " + str.tostring(go_min) + ")") : not timing ? wait : not ema_ok ? "WAIT FOR EMA (" + why + ", EMA not with the zone)" : "GO (" + why + ")"
     [go, st]
 
 score_line(int total, int s_range, int s_time, int s_trend, int s_move, int s_os, int s_pur, int s_rrr, float rrr, float ratio, float pos, string opp_nm, float r_top, float r_btm, string r_top_nm, string r_btm_nm, bool split) =>

@@ -28,8 +28,10 @@ Read only from where candles sit relative to each other, tested against every zo
 - Fresh and once-touched zones are drawn (dashed when not a target). A zone price has come back to twice or more is
   removed: by then it holds about as often as a coin flip (overlap_dotted_test.py: 1st touch +0.19 to +0.21R, 2nd
   +0.11 to +0.15R, 3rd and later +0.05 to +0.11R).
-- Except when it overlaps, even slightly, an active zone of the other timeframe shown on the chart: zones stacked across
-  timeframes are extra confluence and any overlap is significant (Jay).
+- Except when it has been touched only twice and overlaps, even slightly, a zone of another timeframe shown on the chart
+  that has been touched two times or fewer: zones stacked across timeframes are extra confluence and any overlap is
+  significant. Overlapping zones are all active or touched two times or fewer on their own timeframe; a zone touched
+  three times or more never shows (Jay).
 - Targets and the Touch / Zone / Exit entries are unchanged.
 - The entry (Low) timeframe chart shows all three timeframes of the trading style, so zones stacked across them are
   visible where the trade is taken (v222). Higher charts show their own timeframe and the one above.

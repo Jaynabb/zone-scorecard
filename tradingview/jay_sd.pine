@@ -82,6 +82,13 @@ color ema_fast_col = input.color(#F5C542, 'Fast / Mid / Slow Colors', group=ema_
 color ema_slow_col = input.color(#4FC3F7, '', group=ema_group, inline='emac')
 color ema_long_col = input.color(#B39DDB, '', group=ema_group, inline='emac')
 
+// Super Secret 200 EMA, copied from the open source TradingView script of that name so it stays on the chart if that one goes away
+string ss_group = 'Super Secret 200 EMA'
+bool ss_show = input.bool(true, 'Show Super Secret 200 EMA', group=ss_group, tooltip='Copy of the open source Super Secret 200 EMA script: a 200 EMA that is green while the candle closes above it and red while it closes below, its Supertrend line, and its Buy / Sell labels (close crosses the EMA on the same side of the Supertrend). Turn the original off if both are on the chart.')
+int ss_length = input.int(10, 'Supertrend Length', minval=1, group=ss_group)
+float ss_mult = input.float(3.0, 'Supertrend Multiplier', group=ss_group)
+int ss_ema_len = input.int(200, 'EMA Period', minval=1, group=ss_group)
+
 string visual_group = 'Visual Settings'
 color sup_d_col = input.color(#FF6B6B, 'Low TF Supply / Demand', group=visual_group, inline='sd')
 color sup_w_col = input.color(#E03131, 'Mid TF Supply / Demand', group=visual_group, inline='sw')
@@ -1499,6 +1506,28 @@ plotshape(show_ema_sig and ema_buy, 'EMA Buy', shape.triangleup, location.belowb
 plotshape(show_ema_sig and ema_sell, 'EMA Sell', shape.triangledown, location.abovebar, color.new(#FF6B6B, 0), size=size.tiny)
 alertcondition(ema_buy, 'EMA buy candle', '{{ticker}}: EMA signal flipped to BUY')
 alertcondition(ema_sell, 'EMA sell candle', '{{ticker}}: EMA signal flipped to SELL')
+
+// Super Secret 200 EMA, line for line as the original (its Supertrend loop included) so the colors and labels match
+var float ss_supertrend = na
+var float ss_hh = na
+var float ss_ll = na
+for i = ss_length to 1
+    if ta.change(close[i]) > 0
+        ss_hh := math.max(ss_hh, high[i])
+    else
+        ss_ll := math.min(ss_ll, low[i])
+    ss_supertrend := ta.change(close) > 0 ? ss_ll + ss_mult * ta.atr(ss_length) : ss_hh - ss_mult * ta.atr(ss_length)
+float ss_ema = ta.ema(close, ss_ema_len)
+color ss_st_col = ss_supertrend > ss_ema ? color.green : color.red
+color ss_ema_col = close > ss_ema ? color.green : color.red
+plot(ss_show ? ss_supertrend : na, 'Supertrend', color=ss_st_col)
+plot(ss_show ? ss_ema : na, '200 EMA', color=ss_ema_col)
+bool ss_buy = ta.crossover(close, ss_ema) and close > ss_supertrend
+bool ss_sell = ta.crossunder(close, ss_ema) and close < ss_supertrend
+plotshape(ss_show and ss_buy, 'Secret Buy', shape.labelup, location.belowbar, color.green, text='Buy')
+plotshape(ss_show and ss_sell, 'Secret Sell', shape.labeldown, location.abovebar, color.red, text='Sell')
+alertcondition(ss_buy, 'Super Secret 200 EMA buy', '{{ticker}}: Super Secret 200 EMA Buy')
+alertcondition(ss_sell, 'Super Secret 200 EMA sell', '{{ticker}}: Super Secret 200 EMA Sell')
 
 ema_sig_s() =>
     string lens = str.tostring(ema_fast_len) + "/" + str.tostring(ema_slow_len) + "/" + str.tostring(ema_long_len)

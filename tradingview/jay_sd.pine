@@ -1924,6 +1924,6 @@ if barstate.islast
         int t1 = time + 5 * timeframe.in_seconds() * 1000
         for lv in array.from(0.0, 0.25, 0.5, 0.75, 1.0)
             float p = rg_lo + lv * (rg_hi - rg_lo)
-            color col = lv == 1.0 ? color.new(#FF6B6B, 20) : lv == 0.0 ? color.new(#2ECC71, 20) : color.new(#F5C542, lv == 0.5 ? 30 : 55)
-            fib_lines.push(line.new(t0, p, t1, p, xloc=xloc.bar_time, color=col, style=lv == 0.5 ? line.style_dashed : line.style_dotted, width=1))
+            color col = lv == 1.0 ? color.new(#FF6B6B, 0) : lv == 0.0 ? color.new(#2ECC71, 0) : color.new(#F5C542, 0)
+            fib_lines.push(line.new(t0, p, t1, p, xloc=xloc.bar_time, color=col, style=line.style_solid, width=2))
             fib_labels.push(label.new(t0, p, tf_name(TF2) + " " + str.tostring(lv * 100, "#") + "%" + (lv == 1.0 ? " (" + rg_hi_nm + " " + str.tostring(rg_hi, format.mintick) + ")" : lv == 0.0 ? " (" + rg_lo_nm + " " + str.tostring(rg_lo, format.mintick) + ")" : ""), xloc=xloc.bar_time, style=label.style_label_lower_left, color=color.new(color.white, 100), textcolor=col, size=size.tiny))

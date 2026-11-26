@@ -1707,7 +1707,8 @@ if barstate.islast
     if show_tlines
         array<float> tl_px = array.from(tlh_up, tlh_dn, tlm_up, tlm_dn, tl_low_own ? tll_up : na, tl_low_own ? tll_dn : na)
         array<string> tl_nm = array.from(tf_name(TF2) + " UP", tf_name(TF2) + " DOWN", tf_name(trend_tf) + " UP", tf_name(trend_tf) + " DOWN", tf_name(TF0) + " UP", tf_name(TF0) + " DOWN")
-        // every line gets a name; lines on the same price share one label ("1H UP / 30M UP 61509") so none hides another
+        // every line gets a name; lines on the same price share one label ("1H UP / 30M UP 61509") so none hides another.
+        // The text ends at the zones' right edge and runs left, so the price scale never cuts it off
         for k = 0 to 5
             float v = tl_px.get(k)
             bool first = true
@@ -1722,7 +1723,7 @@ if barstate.islast
                     for q = k + 1 to 5
                         if tl_px.get(q) == v
                             txt += " / " + tl_nm.get(q)
-                tl_labels.push(label.new(bar_index + 1, v, txt + " " + str.tostring(v, format.mintick), style=label.style_label_lower_left, color=color.new(color.black, 30), textcolor=k % 2 == 0 ? tl_col_up : tl_col_dn, size=size.small))
+                tl_labels.push(label.new(bar_index + 5, v, txt + " " + str.tostring(v, format.mintick), style=label.style_label_lower_right, color=color.new(color.black, 30), textcolor=k % 2 == 0 ? tl_col_up : tl_col_dn, size=size.small))
 
 //-----------------------------------------------------------------------------
 // SETUP SCORE AND ALERTS

@@ -80,8 +80,18 @@ def zones(df, max_base=12, dep_bars=8):
             # long wick to the body's far side
             if len(b) == 1:
                 k = b[0]; far_w = (h[k] - bhi[k]) if sup else (blo[k] - l[k]); near_w = (blo[k] - l[k]) if sup else (h[k] - bhi[k])
-                if body[k] <= 0.25 * rng[k] and far_w <= body[k] and near_w > far_w:
+                # supply only: every demand doji Jay marked is plain wick to body (USOIL 5M 07:00, BTC 5M 12:10, NQ 1H 14:00)
+                if sup and body[k] <= 0.25 * rng[k] and far_w <= body[k] and near_w > far_w:
                     top, btm = (bhi[k], l[k]) if sup else (h[k], blo[k])
+            # a real move out: the move out candle travels (body at least 45% of its range)
+            # the move's way; a drift of wide, small bodied candles is just the move continuing (NQ 1H 20:00-22:00)
+            def travels(q):
+                return q < n and ((c[q] < o[q]) if sup else (c[q] > o[q])) and body[q] >= 0.45 * rng[q]
+            # ... or the move in was a strong impulse: its candle (just before the base) at least 3x the base's biggest body
+            # (NQ 1H 14:00 doji after the 12:00-13:00 rally; the 20:00 pause inside the drift after it has neither)
+            f0 = b[0] - 1
+            strong_in = f0 >= 0 and body[f0] >= 3 * body[b].max() and body[f0] >= 0.45 * rng[f0]
+            if not (travels(i) or strong_in): continue
             # departure: price leaves the base by its own body span (at least half its average candle range)
             span = max(bhi[b].max() - blo[b].min(), 0.5 * np.mean(rng[b]))
             seg = slice(i, min(i + dep_bars, n))

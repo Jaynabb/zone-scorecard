@@ -19,8 +19,11 @@ Read only from where candles sit relative to each other, tested against every zo
 - **Part of the move:** the first base candle must not itself break out in the move out's direction (BTC 5M 19:25).
 - **Pause:** the base holds a candle whose body is under half its range (no zone at a V top of travelling candles).
 - **Edges:** wick to body; spike wicks left out; a one candle doji whose far wick is shorter than its body runs from the
-  long wick to the body's far side (NQ 1H 16:00).
-- **Real move:** price leaves by 1.5 typical bodies within 8 candles.
+  long wick to the body's far side (NQ 1H 16:00). Supply only: demand dojis are always plain wick to body (NQ 1H
+  14:00 25948-26018).
+- **Real move:** price leaves by 1.5 typical bodies within 8 candles, and either the move out candle travels (body at
+  least 45% of its range) or the move in was a strong impulse (its candle 3x the base's biggest body). A pause inside a
+  drift is just the move (NQ 1H 20:00, Jay: 'just the bullish move').
 - A base that keeps building from the same first candle replaces its shorter version (USOIL 1H 23:00-05:00).
 
 ## 0b. Which old zones stay on the chart (v220)

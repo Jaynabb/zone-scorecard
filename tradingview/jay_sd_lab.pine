@@ -270,7 +270,9 @@ detect(bool is_supply, int k, float yard) =>
         float w_hi = na
         float w_lo = na
         bool pause = false
+        float b_max = 0.0
         for q = first to k + 1
+            b_max := math.max(b_max, math.abs(close[q] - open[q]))
             b_hi := na(b_hi) ? math.max(open[q], close[q]) : math.max(b_hi, math.max(open[q], close[q]))
             b_lo := na(b_lo) ? math.min(open[q], close[q]) : math.min(b_lo, math.min(open[q], close[q]))
             w_hi := na(w_hi) ? high[q] : math.max(w_hi, high[q])
@@ -295,7 +297,13 @@ detect(bool is_supply, int k, float yard) =>
             last_moves := same_way and bl >= 0.45 * (high[k + 1] - low[k + 1]) and bl > 1.5 * rest.median() and math.abs(close[k] - open[k]) <= 2 * bl
         bool beyond = (is_supply ? close[k] < b_lo : close[k] > b_hi) and not last_moves
         bool first_brk = na(close[first + 1]) ? false : is_supply ? close[first] < low[first + 1] : close[first] > high[first + 1]
-        if beyond and not first_brk and pause
+        // a real move: the move out candle travels (body at least 45% of its range) the move's way, or the move in was a
+        // strong impulse (its candle at least 3x the base's biggest body). A pause inside a drift of wide, small bodied
+        // candles is just the move continuing (NQ 1H 20:00 inside the climb after the 14:00 doji)
+        bool out_travels = (is_supply ? close[k] < open[k] : close[k] > open[k]) and math.abs(close[k] - open[k]) >= 0.45 * (high[k] - low[k])
+        float bin = math.abs(close[first + 1] - open[first + 1])
+        bool strong_in = not na(bin) and bin >= 3 * b_max and bin >= 0.45 * (high[first + 1] - low[first + 1])
+        if beyond and not first_brk and pause and (out_travels or strong_in)
             cnt := first - k
             float far = is_supply ? w_hi : w_lo
             if cnt >= 2
@@ -321,7 +329,8 @@ detect(bool is_supply, int k, float yard) =>
                 float dn_w = math.min(open[od], close[od]) - low[od]
                 float far_w = is_supply ? up_w : dn_w
                 float near_w = is_supply ? dn_w : up_w
-                if bd <= 0.25 * (high[od] - low[od]) and far_w <= bd and near_w > far_w
+                // supply only: every demand doji Jay marked is plain wick to body (USOIL 5M 07:00, BTC 5M 12:10, NQ 1H 14:00)
+                if is_supply and bd <= 0.25 * (high[od] - low[od]) and far_w <= bd and near_w > far_w
                     z_top := is_supply ? math.max(open[od], close[od]) : high[od]
                     z_btm := is_supply ? low[od] : math.min(open[od], close[od])
             lt := time[first]

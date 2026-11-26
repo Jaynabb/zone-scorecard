@@ -17,3 +17,4 @@ BTCUSD,5m,supply,2026-11-25 19:15,60862.95,61476.82,0.15,19:15 spike + 19:20 ins
 USOIL,1M,supply,2026-04-01,101.72,117.63,0.15,Apr 2026 base
 USOIL,1M,demand,2025-12-01,54.98,58.96,0.15,Dec 2025 base
 BTCUSD,5m,demand,2026-11-25 19:00,60323.99,60480.94,0.15,base 18:55-19:05 small candles; 19:05 is base because the 19:10 leg out is over twice its size (Jay drew it 'correct')
+NQ,1h,demand,2026-11-25 14:00,25948.00,26018.00,0.2,14:00 doji after the 12:00-13:00 rally: plain wick to body (demand dojis never flip); the 20:00 zone above is just the bullish move (no zone)

@@ -203,6 +203,10 @@ bool show_c = mode_d != 0 and mode_w != 0 and mode_m != 0
 
 // the style slot drawn at the chart's own timeframe (-1 when the chart timeframe is not in the style)
 int chart_slot = mode_d == 0 ? 0 : mode_w == 0 ? 1 : mode_m == 0 ? 2 : -1
+// timeframes drawn on this chart: its own and the one above; the entry (Low) timeframe chart shows all three of the style,
+// so zones stacked across the style's timeframes can be seen where the trade is taken
+tf_on_chart(int s2) =>
+    chart_slot >= 0 and (s2 == chart_slot or s2 == chart_slot + 1 or chart_slot == 0)
 
 // the timeframe a slot reads
 slot_tf(int slot) =>
@@ -978,7 +982,7 @@ dup_lower(int slot, bool is_supply, box b, bool need_full) =>
 stacked(int slot, bool is_supply, box b) =>
     bool hit = false
     for s2 = 0 to 2
-        bool shown_tf = chart_slot >= 0 and (s2 == chart_slot or s2 == chart_slot + 1)
+        bool shown_tf = tf_on_chart(s2)
         if s2 != slot and shown_tf
             array<Zone> oa = s2 == 0 ? (is_supply ? sup_d : dem_d) : s2 == 1 ? (is_supply ? sup_w : dem_w) : (is_supply ? sup_m : dem_m)
             if oa.size() > 0
@@ -1064,7 +1068,7 @@ refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<bo
         float reach = faint_reach > 0 ? faint_reach * slot_yard.get(slot) : na
         // older (dashed) zones only for the chart's own timeframe and the one above it: a Daily retest base on a 1H chart
         // is checked on the 4H or Daily chart, not stacked here
-        bool faint_tf = slot == 3 or (chart_slot >= 0 and (slot == chart_slot or slot == chart_slot + 1))
+        bool faint_tf = slot == 3 or (slot < 3 and tf_on_chart(slot))
         if show_all and md != 2 and faint_tf
             for i = 0 to n - 1
                 Zone z = zones.get(i)
@@ -1266,13 +1270,10 @@ if barstate.islast
     if anchor_slot != 2
         refresh(sup_m, true, 2, false, a_s, corr_only)
         refresh(dem_m, false, 2, false, a_d, corr_only)
-    // Each chart shows its own timeframe and the one above it, nothing else: a 1H chart (Day Trading) shows 1H and 4H
-    // zones, a 4H chart 4H and Daily, a Daily chart Daily. The other style timeframes are checked on their own charts.
-    // Their targets were picked above, so the score labels and the trend table stay
-    if chart_slot == 0
-        sup_m.hide_all(true, 2)
-        dem_m.hide_all(false, 2)
-    else if chart_slot > 0
+    // The entry (Low) timeframe chart shows all three timeframes of the style, so zones stacked across them can be seen
+    // where the trade is taken (Jay). A higher chart shows its own timeframe and the one above it: a 4H chart in Day
+    // Trading shows 4H and Daily, a Daily chart Daily. Targets were picked above, so the score labels and trend table stay
+    if chart_slot > 0
         sup_d.hide_all(true, 0)
         dem_d.hide_all(false, 0)
         if chart_slot == 2

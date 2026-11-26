@@ -31,6 +31,8 @@ Read only from where candles sit relative to each other, tested against every zo
 - Except when it overlaps, even slightly, an active zone of the other timeframe shown on the chart: zones stacked across
   timeframes are extra confluence and any overlap is significant (Jay).
 - Targets and the Touch / Zone / Exit entries are unchanged.
+- The entry (Low) timeframe chart shows all three timeframes of the trading style, so zones stacked across them are
+  visible where the trade is taken (v222). Higher charts show their own timeframe and the one above.
 
 ## 1. A zone is leg in, base, leg out
 

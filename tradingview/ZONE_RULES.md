@@ -23,6 +23,15 @@ Read only from where candles sit relative to each other, tested against every zo
 - **Real move:** price leaves by 1.5 typical bodies within 8 candles.
 - A base that keeps building from the same first candle replaces its shorter version (USOIL 1H 23:00-05:00).
 
+## 0b. Which old zones stay on the chart (v220)
+
+- Fresh and once-touched zones are drawn (dashed when not a target). A zone price has come back to twice or more is
+  removed: by then it holds about as often as a coin flip (overlap_dotted_test.py: 1st touch +0.19 to +0.21R, 2nd
+  +0.11 to +0.15R, 3rd and later +0.05 to +0.11R).
+- Except when at least half of it sits inside a fresh zone of the other timeframe shown on the chart: zones stacked
+  across timeframes are extra confluence (Jay) and stay.
+- Targets and the Touch / Zone / Exit entries are unchanged.
+
 ## 1. A zone is leg in, base, leg out
 
 - **Leg in:** the move into the base. Full size candles (body more than about 1.5 typical bodies) heading toward

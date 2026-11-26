@@ -972,6 +972,25 @@ dup_lower(int slot, bool is_supply, box b, bool need_full) =>
 // Draw the nearest show_n zones on this side in full, the rest faint (Show All Valid Zones). White outline on the closest one if asked.
 // With use_filter, a zone is eligible only if it overlaps one of the anchor boxes (the visible chart timeframe zones).
 // Returns the boxes that ended up visible.
+// True when at least half of the box sits inside a fresh (untouched) zone of the same side on the other timeframe shown
+// on this chart (the chart's own and the one above): stacked zones are extra confluence
+stacked(int slot, bool is_supply, box b) =>
+    bool hit = false
+    for s2 = 0 to 2
+        bool shown_tf = chart_slot >= 0 and (s2 == chart_slot or s2 == chart_slot + 1)
+        if s2 != slot and shown_tf
+            array<Zone> oa = s2 == 0 ? (is_supply ? sup_d : dem_d) : s2 == 1 ? (is_supply ? sup_w : dem_w) : (is_supply ? sup_m : dem_m)
+            if oa.size() > 0
+                for q = 0 to oa.size() - 1
+                    Zone oz = oa.get(q)
+                    float ov = math.min(oz.b.get_top(), b.get_top()) - math.max(oz.b.get_bottom(), b.get_bottom())
+                    if oz.touches == 0 and ov >= 0.5 * (b.get_top() - b.get_bottom())
+                        hit := true
+                        break
+        if hit
+            break
+    hit
+
 refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<box> anchors, bool use_filter) =>
     [w, tr, nm] = zone_style(slot)
     color base = zone_color(slot, is_supply)
@@ -1066,7 +1085,13 @@ refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<bo
                 // the entry timeframe's own edges are the ones traded. On the Mid and High timeframes every retest base still
                 // shows, since the newest base is the level watched there
                 bool covered = (slot == 0 or slot == 3) and superseded(zones, i)
-                if near and not covered and not shown_flag.get(i) and not (use_filter and not anchors.overlaps_any(b.get_top(), b.get_bottom())) and not dup_lower(slot, is_supply, b, false)
+                // a zone price has come back to twice or more is no longer drawn: by the 2nd retest it holds about as
+                // often as a coin flip (overlap_dotted_test.py). Fresh and once-touched zones stay as dashed levels.
+                // Targets are picked above, so the Zone and Exit entries on retested zones are unchanged
+                // ... unless it sits on an active zone of the other timeframe shown on this chart: zones stacked across
+                // timeframes are extra confluence and stay
+                bool worn = z.touches >= 2 and not z.inside and not stacked(slot, is_supply, b)
+                if near and not covered and not worn and not shown_flag.get(i) and not (use_filter and not anchors.overlaps_any(b.get_top(), b.get_bottom())) and not dup_lower(slot, is_supply, b, false)
                     // outline only, bright green for demand and red for supply, so old zones read apart from the drawn ones
                     b.set_bgcolor(color.new(base, 100))
                     b.set_border_color(is_supply ? color.new(#FF5252, 25) : color.new(#2ECC71, 25))

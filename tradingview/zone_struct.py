@@ -30,7 +30,10 @@ def candles(sym, tf):
     df["dt"] = pd.to_datetime(df.t, unit="s", utc=True).dt.tz_convert("America/New_York")
     return df.reset_index(drop=True)
 
-def zones(df, max_base=12, dep_bars=8):
+def zones(df, max_base=12, dep_bars=8, pause_run=None):
+    # pause_run: None = the pause candle must be in the base from the turn on (current rule); 'check' = a pause candle
+    # anywhere in the walked run of side by side candles counts; 'extend' = same, and the base reaches back to that pause candle
+    pause_run = pause_run or os.environ.get('PAUSE_RUN')
     o, h, l, c = (df[k].values for k in "ohlc"); n = len(c); out = []
     body = np.abs(c - o); bhi = np.maximum(o, c); blo = np.minimum(o, c); rng = np.maximum(h - l, 1e-12)
     for sup in (True, False):
@@ -52,6 +55,10 @@ def zones(df, max_base=12, dep_bars=8):
             e = int(np.argmax(bhi[bb])) if sup else int(np.argmin(blo[bb]))
             w = int(np.argmax(h[bb])) if sup else int(np.argmin(l[bb]))
             b = list(bb[min(e, w):])
+            run_pause = bool((body[bb] < 0.5 * rng[bb]).any())
+            if pause_run == 'extend' and not (body[np.array(b)] < 0.5 * rng[np.array(b)]).any() and run_pause:
+                pz = [q for q in bb if body[q] < 0.5 * rng[q] and q < b[0]]
+                if pz: b = list(range(pz[-1], b[-1] + 1))
             # the candle right before the move out is base only if it is not itself travelling against the rest of the
             # base (then the move out started there)
             if len(b) >= 2:
@@ -98,14 +105,15 @@ def zones(df, max_base=12, dep_bars=8):
             if not (l[seg].min() <= btm - span if sup else h[seg].max() >= top + span): continue
             yard = np.median(body[max(0, i - 20):i])
             dep = (btm - l[seg].min()) if sup else (h[seg].max() - top)
-            pause = bool((body[b] < 0.5 * rng[b]).any())
+            pause = bool((body[b] < 0.5 * rng[b]).any()) or (pause_run == 'check' and run_pause)
             # a real move: price leaves by at least 1.5 normal candles (median body of the last 20), and the base has a
             # pause candle (body under half its range): a turn made only of travelling candles is not a base
             if dep < 1.5 * yard or not pause: continue
             out.append(dict(sup=sup, t0=df.dt[b[0]], t1=df.dt[b[-1]], top=top, btm=btm, n=len(b), imp=df.dt[i], dep_y=dep / max(yard, 1e-12), pause=pause))
     return out
 
-fx = [r for r in csv.reader(l for l in open(os.path.join(HERE, "zone_fixtures.csv")) if not l.startswith("#"))]
+if __name__ != '__main__': fx = []
+else: fx = [r for r in csv.reader(l for l in open(os.path.join(HERE, "zone_fixtures.csv")) if not l.startswith("#"))]
 cache = {}; ok = 0
 for sym, tf, side, bt, eb, et, tol, note in fx:
     key = (sym, tf)
@@ -122,4 +130,4 @@ for sym, tf, side, bt, eb, et, tol, note in fx:
     ok += good
     got = "nothing" if best is None else f"{best['btm']:.2f}-{best['top']:.2f} base {best['t0']:%m-%d %H:%M}..{best['t1']:%H:%M} ({best['n']}) out {best['imp']:%H:%M} dep {best['dep_y']:.1f}x pause {best['pause']}"
     print(f"  {'PASS' if good else 'FAIL'} {sym:6s} {tf:3s} {side:6s} {bt}: want {eb}-{et} | got {got}")
-print(f"\n{ok} of {len(fx)} pass")
+if fx: print(f"\n{ok} of {len(fx)} pass")

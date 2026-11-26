@@ -272,6 +272,19 @@ detect(bool is_supply, int k, float yard) =>
             if is_supply ? high[q] > high[w_off] : low[q] < low[w_off]
                 w_off := q
         int first = math.max(e_off, w_off)
+        // the pause can sit before the turn (Jay, BTC 5M 2026-11-26 16:40-16:45 supply): when the candles from the turn on
+        // hold no pause candle but an earlier candle of the same side by side run does, the base reaches back to the
+        // nearest such candle (pause_run_backtest.py: the zones this adds did +0.30R on 5m and +0.26R on 1H at 2R, against
+        // +0.20R / +0.19R for the zones already drawn; zone_fixtures 18/18)
+        bool turn_pause = false
+        for q = first to k + 1
+            if math.abs(close[q] - open[q]) < 0.5 * (high[q] - low[q])
+                turn_pause := true
+        if not turn_pause and last > first
+            for q = first + 1 to last
+                if math.abs(close[q] - open[q]) < 0.5 * (high[q] - low[q])
+                    first := q
+                    break
         float b_hi = na
         float b_lo = na
         float w_hi = na

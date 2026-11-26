@@ -18,6 +18,8 @@ Read only from where candles sit relative to each other, tested against every zo
 - **Turn:** the base starts at the candle with the most extreme body, or an earlier one holding the extreme wick.
 - **Part of the move:** the first base candle must not itself break out in the move out's direction (BTC 5M 19:25).
 - **Pause:** the base holds a candle whose body is under half its range (no zone at a V top of travelling candles).
+  When the candles from the turn on hold none but an earlier candle of the same side by side run does, the base reaches
+  back to the nearest such candle (BTC 5M 2026-11-26 supply 60804.79-60849.77, base 16:40-16:45; pause_run_backtest.py).
 - **Edges:** wick to body; spike wicks left out; a one candle doji whose far wick is shorter than its body runs from the
   long wick to the body's far side (NQ 1H 16:00). Supply only: demand dojis are always plain wick to body (NQ 1H
   14:00 25948-26018).

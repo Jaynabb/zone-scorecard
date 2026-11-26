@@ -57,7 +57,7 @@ int show_n = input.int(3, 'Show Nearest Zones Per Side', minval=1, maxval=20, gr
 
 string tf_group = 'Timeframes'
 bool show_d = input.bool(true, 'Low timeframe zones (entry)', group=tf_group)
-bool show_minor = input.bool(true, 'Minor zones (warning only)', group=tf_group, tooltip='Dotted outlines on the chart timeframe at old turning points that never made a full zone (the base candles were too big or price did not move away far enough). Price often stalls there. They are never targets, never scored and never give a GO. A minor zone disappears when a candle closes through it.')
+bool show_minor = input.bool(false, 'Minor zones (warning only)', group=tf_group, tooltip='Dotted outlines on the chart timeframe at old turning points that never made a full zone (the base candles were too big or price did not move away far enough). Price often stalls there. They are never targets, never scored and never give a GO. A minor zone disappears when a candle closes through it.')
 bool show_w = input.bool(true, 'Mid timeframe zones (trend)', group=tf_group)
 bool show_m = input.bool(true, 'High timeframe zones (range)', group=tf_group)
 bool highlight_nearest = input.bool(true, 'Outline Nearest Zones In White', group=tf_group, tooltip='On the chart timeframe, the closest supply above price and the closest demand below price get a white border and a TARGET label. Higher timeframe frames are never tagged as targets.')

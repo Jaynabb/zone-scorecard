@@ -1639,34 +1639,43 @@ if barstate.islast and show_trend
 // (100% at the near edge of the High timeframe supply at the swing high, 0% at the near edge of the demand at the swing low)
 // and an automatic risk to reward (entry at the zone's near edge, stop at its far edge, target at the other target zone).
 //-----------------------------------------------------------------------------
-// The zone a High timeframe swing turned from: the zone of that side nearest the swing extreme, a zone holding the
-// extreme counting as zero distance (a zone above a swing low was traded through, so it loses to the one the low
-// touched). It must lie within a quarter of the range from the extreme. na when none.
 swing_zone(array<Zone> zones, bool is_supply, float ext, float span) =>
+    // the zone the range stops at (Jay): it has to be a zone, not a bare swing price. The zone of that side nearest the
+    // swing extreme (a zone holding the extreme counts as zero distance), on the correct side of price (a supply with
+    // its top above price, a demand with its bottom below it), however far from the swing it sits
     box best = na
     float bd = na
     if zones.size() > 0 and not na(ext) and span > 0
         for i = 0 to zones.size() - 1
             box b = zones.get(i).b
+            bool side_ok = is_supply ? b.get_top() > close : b.get_bottom() < close
             float d = ext > b.get_top() ? ext - b.get_top() : ext < b.get_bottom() ? b.get_bottom() - ext : 0.0
-            if d <= span * 0.25 and (na(bd) or d < bd)
+            if side_ok and (na(bd) or d < bd)
                 bd := d
                 best := b
     best
 
-// The range: a fib on the High timeframe (the highest of the three, set by the trading style or the custom
-// timeframes) over its last swing high and swing low (see fib_pack), drawn zone to zone: 100% at the near (bottom)
-// edge of the High timeframe supply the swing high came out of, 0% at the near (top) edge of the High timeframe
-// demand the swing low came out of. An end with no such zone uses the swing price itself. Returns [top, bottom, top
-// name, bottom name, top time, bottom time]; the times anchor the drawing at the zone's base candle or the swing.
+// The range: drawn zone to zone over the High timeframe's last swing high and swing low (see fib_pack): 100% at the
+// inner (bottom) edge of the supply zone nearest the swing high, 0% at the inner (top) edge of the demand zone nearest
+// the swing low. The zone is taken from the High timeframe, else the Mid timeframe; only with no zone of that side on
+// either does the swing price stand in. The whole end zone counts as the top or bottom of the range for the score.
+// Returns [top, bottom, top name, bottom name, top time, bottom time]; the times anchor the drawing.
 range_levels() =>
     float span = fib_hi - fib_lo
     box s = swing_zone(sup_m, true, fib_hi, span)
+    string s_tf = tf_name(TF2)
+    if na(s)
+        s := swing_zone(sup_w, true, fib_hi, span)
+        s_tf := tf_name(TF1)
     box d = swing_zone(dem_m, false, fib_lo, span)
+    string d_tf = tf_name(TF2)
+    if na(d)
+        d := swing_zone(dem_w, false, fib_lo, span)
+        d_tf := tf_name(TF1)
     float hi = na(s) ? fib_hi : s.get_bottom()
     float lo = na(d) ? fib_lo : d.get_top()
-    string hi_nm = tf_name(TF2) + (na(s) ? " swing high" : " supply")
-    string lo_nm = tf_name(TF2) + (na(d) ? " swing low" : " demand")
+    string hi_nm = na(s) ? tf_name(TF2) + " swing high" : s_tf + " supply"
+    string lo_nm = na(d) ? tf_name(TF2) + " swing low" : d_tf + " demand"
     int hi_t = na(s) ? fib_hi_t : s.get_left()
     int lo_t = na(d) ? fib_lo_t : d.get_left()
     // two zones that overlap leave no range between their edges: then the swings decide

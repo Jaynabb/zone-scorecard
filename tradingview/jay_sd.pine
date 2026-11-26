@@ -210,277 +210,123 @@ slot_tf(int slot) =>
 //-----------------------------------------------------------------------------
 // BASE DETECTION (runs inside each timeframe's own context)
 //-----------------------------------------------------------------------------
-// Looks at the candle k bars back. If it is an impulse (big body, moving away from the base),
-// walks left over the small overlapping candles that form the base and returns the zone.
-// Supply = base wick high down to the lowest base body. Demand = base wick low up to the highest base body.
-// Returns [found, top, btm, left_time, base_count, impulse_time, turn, turn_t0, turn_t1, turn_extreme].
-// turn is true when the impulse qualified but no clean base did: the timeframe below is then asked for the base.
+// A zone is leg in, base, leg out, read only from where candles sit relative to each other (no preset candle sizes;
+// tested against Jay's marked zones in zone_fixtures.csv with zone_struct.py, see ZONE_RULES.md):
+//   move out  the candle k bars back closes beyond the body of the candle before it, and beyond the base's bodies
+//   base      walking back, a candle is base while its range and the next candle's overlap by at least half
+//   move in   the walk stops at a travelling candle (body most of its range and over 1.5x the base's median body)
+//   turn      the base starts at the candle with the most extreme body, or an earlier one holding the extreme wick
+//   first     the first base candle is not itself a breakout in the move out's direction (then it is the move)
+//   pause     the base holds a candle whose body is under half its range (a turn of travelling candles is no base)
+//   edges     wick to body; spike wicks left out on bases of 2+; a one candle doji whose far wick is shorter than its
+//             body runs from the long wick to the body's far side
+// The departure (price leaves by 1.5 typical bodies within dep_bars) is checked by candidate().
+// Returns [found, top, btm, left_time, base_count, impulse_time, turn, turn_t0, turn_t1, turn_extreme, gap_cut,
+// gap_full, amb]; the turn / drill-down fields stay off with this reader.
 detect(bool is_supply, int k, float yard) =>
-    float lim = yard * impulse_mult
     bool found = false
     float z_top = na
     float z_btm = na
     int lt = na
     int cnt = 0
-    bool turn = false
-    bool gap_cut = false
-    int t_t0 = na
-    int t_t1 = na
-    float t_ext = na
-    int legs = 0
-    float body = math.abs(close[k] - open[k])
-    bool away = is_supply ? close[k] < open[k] : close[k] > open[k]
-    // a gap between this candle and the one before it is part of the impulse: price left the base without trading
-    // there, so the gap counts as impulsive movement (the sheet's rule) and a gap alone can be the impulse.
-    // The gap is measured at the open against the previous candle's body, the way it shows on the chart; a wick
-    // that later dips back into the gap does not undo it
-    float prev_top = math.max(open[k + 1], close[k + 1])
-    float prev_btm = math.min(open[k + 1], close[k + 1])
-    // a gap smaller than a tenth of a typical body is feed noise (24 hour markets open a few cents off the last
-    // close all the time), not price leaving without trading
     float min_gap = yard * 0.1
-    float gap_raw = is_supply ? math.max(prev_btm - open[k], 0.0) : math.max(open[k] - prev_top, 0.0)
-    float gap_in = gap_raw > min_gap ? gap_raw : 0.0
-    bool gap_imp = gap_in > 0
-    // a full gap: the impulse opened beyond the previous candle's wick, so price never traded back at the base's edge.
-    // This is the "gap away from the zone" that allows an entry before any retest; a gap that only clears the body does not
     bool gap_full = is_supply ? open[k] < low[k + 1] - min_gap : open[k] > high[k + 1] + min_gap
-    // a candle closing back toward the base adds nothing: only the gap itself can drive then
-    float drive = away ? body + nz(gap_in) : nz(gap_in)
-    // a candle a little under the size rule still drives when price clearly left the base: it closes past the whole
-    // range of the candle before it (wick included) and the move from that candle's far wick (the zone's edge) to this
-    // close is an impulse in size. Chop that stays inside the base candle's range never qualifies
-    float move_out = is_supply ? high[k + 1] - close[k] : close[k] - low[k + 1]
-    bool cleared = is_supply ? close[k] < low[k + 1] : close[k] > high[k + 1]
-    if away and drive < lim and cleared and move_out >= lim
-        drive := move_out
-    if not na(body) and drive >= lim and (away or gap_imp)
-        float base_lim = drive * base_mult
-        float a_lo = na   // full range of the base so far (wicks)
-        float a_hi = na
-        float w_lo = na   // running wick extremes of the base
+    bool out1 = is_supply ? close[k] < math.min(open[k + 1], close[k + 1]) : close[k] > math.max(open[k + 1], close[k + 1])
+    if out1 and not na(close[k + 2])
+        array<float> bods = array.new<float>()
+        bods.push(math.abs(close[k + 1] - open[k + 1]))
+        int last = k + 1
+        for q = k + 2 to k + base_max + 1
+            if na(close[q])
+                break
+            float rq = math.max(high[q] - low[q], syminfo.mintick)
+            float rn = math.max(high[q - 1] - low[q - 1], syminfo.mintick)
+            float ov = math.min(high[q], high[q - 1]) - math.max(low[q], low[q - 1])
+            if ov < 0.5 * math.min(rq, rn)
+                break
+            float bq = math.abs(close[q] - open[q])
+            if bq >= 0.45 * rq and bq > 1.5 * bods.median()
+                break
+            bods.push(bq)
+            last := q
+        // the turn: oldest candle with the most extreme body, or with the extreme wick, whichever comes first
+        int e_off = last
+        int w_off = last
+        for q = last to k + 1
+            float bx = is_supply ? math.max(open[q], close[q]) : math.min(open[q], close[q])
+            float be = is_supply ? math.max(open[e_off], close[e_off]) : math.min(open[e_off], close[e_off])
+            if is_supply ? bx > be : bx < be
+                e_off := q
+            if is_supply ? high[q] > high[w_off] : low[q] < low[w_off]
+                w_off := q
+        int first = math.max(e_off, w_off)
+        float b_hi = na
+        float b_lo = na
         float w_hi = na
-        float bb_lo = na  // running body extremes of the base
-        float bb_hi = na
-        for j = 1 to base_max + 4
-            if cnt >= base_max
-                break
-            int off = k + j
-            // a candle between the base and the impulse that moves the impulse's way and closes beyond the candle
-            // before it (above its high for demand, below its low for supply) is the start of the move, not the base
-            bool leg_c = is_supply ? close[off] < open[off] and close[off] < low[off + 1] : close[off] > open[off] and close[off] > high[off + 1]
-            // a tiny pause candle (body under a quarter of a typical body) inside the leg is still the leg when the candle
-            // before it was a leg candle
-            bool leg_prev = is_supply ? close[off + 1] < open[off + 1] and close[off + 1] < low[off + 2] : close[off + 1] > open[off + 1] and close[off + 1] > high[off + 2]
-            bool tiny = math.abs(close[off] - open[off]) <= 0.25 * yard
-            if cnt == 0 and legs < 4 and (leg_c or (legs > 0 and tiny and leg_prev))
-                legs += 1
-                continue
-            float bd = math.abs(close[off] - open[off])
-            float bh = math.max(open[off], close[off])
-            float bl = math.min(open[off], close[off])
-            // a balance candle (body at most half its own range) belongs to the base whatever the impulse size, as long
-            // as its body is no bigger than the impulse
-            float rg = high[off] - low[off]
-            bool balance = rg > 0 and bd <= rg * 0.5 and bd <= drive
-            // the candle a gap left behind is the base whatever its size: the gap itself is the proof of imbalance
-            if na(bd) or (bd > base_lim and not (j == 1 + legs and gap_imp) and not balance)
-                break
-            // a true gap between two base candles ends the base: only the candles on the impulse side of the gap are
-            // the zone (gap refined), as the sheet draws it. A true gap is the later candle opening beyond the earlier
-            // candle's wick, so price never traded there. An open a tick off the previous body is not a gap (on
-            // intraday charts that cut most bases down to one candle)
-            if cnt > 0 and (open[off - 1] > high[off] + min_gap or open[off - 1] < low[off] - min_gap)
-                gap_cut := true
-                break
-            // each base candle's body must share price with the base so far, so the walk stops where the pause started
-            if cnt > 0 and (bh < a_lo or bl > a_hi)
-                break
-            // a pause is tight: the walk stops before the base's bodies would span more than three typical bodies
-            if cnt > 0 and math.max(nz(bb_hi, bh), bh) - math.min(nz(bb_lo, bl), bl) > 3 * yard
-                break
-            bb_hi := na(bb_hi) ? bh : math.max(bb_hi, bh)
-            bb_lo := na(bb_lo) ? bl : math.min(bb_lo, bl)
-            a_lo := na(a_lo) ? low[off] : math.min(a_lo, low[off])
-            a_hi := na(a_hi) ? high[off] : math.max(a_hi, high[off])
-            cnt += 1
-            w_lo := na(w_lo) ? low[off] : math.min(w_lo, low[off])
-            w_hi := na(w_hi) ? high[off] : math.max(w_hi, high[off])
-            z_top := is_supply ? w_hi : (na(z_top) ? bh : math.max(z_top, bh))
-            z_btm := is_supply ? (na(z_btm) ? bl : math.min(z_btm, bl)) : w_lo
-            lt := time[off]
-        // The turn: the base candle holding the lowest body (demand) or highest body (supply) is where the move into the
-        // base ended. When the candle before it stepped toward it, the older candles walked past belong to that move in,
-        // not to the pause, so the base starts at the turn
-        if cnt >= 2
-            int turn_j = legs + 1
-            float ext_b = na
-            for j2 = legs + 1 to legs + cnt
-                int o2 = k + j2
-                float bb = is_supply ? math.max(open[o2], close[o2]) : math.min(open[o2], close[o2])
-                if na(ext_b) or (is_supply ? bb > ext_b : bb < ext_b)
-                    ext_b := bb
-                    turn_j := j2
-            int o3 = k + turn_j
-            // the candle before the turn stepped toward it (against the impulse, its body further from the turn's
-            // extreme, or level with it: a leg in that closes right where the pause opens is still the leg in): it is the
-            // move in, so the base starts at the turn
-            bool arrival = is_supply ? close[o3 + 1] > open[o3 + 1] and math.max(open[o3 + 1], close[o3 + 1]) <= ext_b : close[o3 + 1] < open[o3 + 1] and math.min(open[o3 + 1], close[o3 + 1]) >= ext_b
-            if arrival and turn_j < legs + cnt
-                cnt := turn_j - legs
-                lt := time[o3]
-            // The base is the candle at the extreme and its neighbours that stay level with it (bodies within a quarter of
-            // a typical body of its far body edge). A candle stepping away from that level ends the base: on the impulse
-            // side it is the move out already under way, on the other side the move in. The zone never holds the move.
-            // The search goes on past the walk's candle limit on the old side, since the candles of the move out do not
-            // count toward it, and a deeper level candle found there becomes the extreme
+        float w_lo = na
+        bool pause = false
+        for q = first to k + 1
+            b_hi := na(b_hi) ? math.max(open[q], close[q]) : math.max(b_hi, math.max(open[q], close[q]))
+            b_lo := na(b_lo) ? math.min(open[q], close[q]) : math.min(b_lo, math.min(open[q], close[q]))
+            w_hi := na(w_hi) ? high[q] : math.max(w_hi, high[q])
+            w_lo := na(w_lo) ? low[q] : math.min(w_lo, low[q])
+            if math.abs(close[q] - open[q]) < 0.5 * (high[q] - low[q])
+                pause := true
+        // the candle right before the move out is base only if it is not itself travelling against the rest of the
+        // base (then the move out started there: BTC 5M 06:20 under the 05:55-06:15 supply)
+        bool last_moves = false
+        if first > k + 1
+            array<float> rest = array.new<float>()
+            float r_lo = na
+            float r_hi = na
+            for q = first to k + 2
+                rest.push(math.abs(close[q] - open[q]))
+                r_lo := na(r_lo) ? math.min(open[q], close[q]) : math.min(r_lo, math.min(open[q], close[q]))
+                r_hi := na(r_hi) ? math.max(open[q], close[q]) : math.max(r_hi, math.max(open[q], close[q]))
+            float bl = math.abs(close[k + 1] - open[k + 1])
+            bool same_way = is_supply ? close[k + 1] < r_lo : close[k + 1] > r_hi
+            last_moves := same_way and bl >= 0.45 * (high[k + 1] - low[k + 1]) and bl > 1.5 * rest.median()
+        bool beyond = (is_supply ? close[k] < b_lo : close[k] > b_hi) and not last_moves
+        bool first_brk = na(close[first + 1]) ? false : is_supply ? close[first] < low[first + 1] : close[first] > high[first + 1]
+        if beyond and not first_brk and pause
+            cnt := first - k
+            float far = is_supply ? w_hi : w_lo
             if cnt >= 2
-                int t_j = turn_j
-                float tb_hi = math.max(open[k + t_j], close[k + t_j])
-                float tb_lo = math.min(open[k + t_j], close[k + t_j])
-                float lvl = is_supply ? math.min(tb_lo, tb_hi - 0.25 * yard) : math.max(tb_hi, tb_lo + 0.25 * yard)
-                int j_far = t_j
-                int j_lim = legs + cnt + base_max
-                while j_far + 1 <= j_lim
-                    int o4 = k + j_far + 1
-                    if na(open[o4]) or na(close[o4])
-                        break
-                    float b4_hi = math.max(open[o4], close[o4])
-                    float b4_lo = math.min(open[o4], close[o4])
-                    // a full size candle is a move (in or out), never base
-                    if b4_hi - b4_lo > 1.5 * yard
-                        break
-                    bool deeper = is_supply ? b4_hi > tb_hi : b4_lo < tb_lo
-                    bool level = is_supply ? b4_lo >= lvl : b4_hi <= lvl
-                    if deeper and level
-                        // a level candle reaching further is the new extreme: the level is measured from it
-                        t_j := j_far + 1
-                        tb_hi := b4_hi
-                        tb_lo := b4_lo
-                        lvl := is_supply ? math.min(tb_lo, tb_hi - 0.25 * yard) : math.max(tb_hi, tb_lo + 0.25 * yard)
-                    else if not level
-                        break
-                    j_far += 1
-                // impulse side: the base runs to the last candle whose body comes back to the extreme (within 0.6 of a
-                // typical body). A sideways base that steps away and returns is all base; once price leaves and does not
-                // come back, the candles after the last return are the move out
-                int j_near = t_j
-                float t_body_ext = is_supply ? math.max(open[k + t_j], close[k + t_j]) : math.min(open[k + t_j], close[k + t_j])
-                if t_j - 1 >= legs + 1
-                    for jj = legs + 1 to t_j - 1
-                        int o4 = k + jj
-                        float back = is_supply ? t_body_ext - math.max(open[o4], close[o4]) : math.min(open[o4], close[o4]) - t_body_ext
-                        if back <= 0.6 * yard
-                            j_near := jj
-                            break
-                // then on toward the impulse while candles stay inside the range of bodies the base has already set
-                float rb_hi = na
-                float rb_lo = na
-                for jj = j_near to j_far
-                    rb_hi := na(rb_hi) ? math.max(open[k + jj], close[k + jj]) : math.max(rb_hi, math.max(open[k + jj], close[k + jj]))
-                    rb_lo := na(rb_lo) ? math.min(open[k + jj], close[k + jj]) : math.min(rb_lo, math.min(open[k + jj], close[k + jj]))
-                while j_near - 1 >= legs + 1
-                    int o4 = k + j_near - 1
-                    if math.max(open[o4], close[o4]) > rb_hi + 0.25 * yard or math.min(open[o4], close[o4]) < rb_lo - 0.25 * yard
-                        break
-                    j_near -= 1
-                // candles between the extreme and an older one that the new level leaves out are trimmed from the far side
-                int j_back = j_far
-                while j_back > t_j
-                    int o4 = k + j_back
-                    if is_supply ? math.min(open[o4], close[o4]) < lvl : math.max(open[o4], close[o4]) > lvl
-                        j_back -= 1
-                    else
-                        break
-                j_far := j_back
-                legs := j_near - 1
-                cnt := j_far - j_near + 1
-                lt := time[k + j_far]
-        // Spike wicks: on a base of two or more candles, the far edge is the most extreme wick that is not a spike (see
-        // below). A spike is a liquidity grab inside the pause, not where the zone ends; the wick to body rule still holds
-        // for the wicks that remain.
-        // The near edge is the most extreme body (wick to body)
-        if cnt >= 1
-            float b_lo = na
-            float b_hi = na
-            float w_ext = na
-            for j2 = legs + 1 to legs + cnt
-                int o2 = k + j2
-                b_lo := na(b_lo) ? math.min(open[o2], close[o2]) : math.min(b_lo, math.min(open[o2], close[o2]))
-                b_hi := na(b_hi) ? math.max(open[o2], close[o2]) : math.max(b_hi, math.max(open[o2], close[o2]))
-                w_ext := is_supply ? (na(w_ext) ? high[o2] : math.max(w_ext, high[o2])) : (na(w_ext) ? low[o2] : math.min(w_ext, low[o2]))
-            float far = w_ext
-            if cnt >= 2
-                // a wick is a spike only when it reaches far beyond the base's other wicks: more than three times their
-                // typical (median) reach past the bodies, and at least a quarter of the base height. When every candle
-                // in the base has a long wick, the wicks are the zone
+                // a spike wick reaches past the bodies over three times the base's median reach (and a quarter of the
+                // body span) and is longer than its own candle's body: a liquidity grab, not the zone's edge
                 array<float> reach = array.new<float>()
-                for j2 = legs + 1 to legs + cnt
-                    int o2 = k + j2
-                    reach.push(math.max(is_supply ? high[o2] - b_hi : b_lo - low[o2], 0.0))
-                float thr = math.max(3 * reach.median(), 0.25 * math.max(b_hi - b_lo, yard))
+                for q = first to k + 1
+                    reach.push(math.max(is_supply ? high[q] - b_hi : b_lo - low[q], 0.0))
+                float thr = math.max(3 * reach.median(), 0.25 * (b_hi - b_lo))
                 far := na
-                for j2 = legs + 1 to legs + cnt
-                    int o2 = k + j2
-                    // and it is longer than its own candle's body: a rejection spike. A wick shorter than its body is part
-                    // of the pause however far it reaches
-                    float own_body = math.abs(close[o2] - open[o2])
-                    float own_wick = is_supply ? high[o2] - math.max(open[o2], close[o2]) : math.min(open[o2], close[o2]) - low[o2]
-                    bool spike = (is_supply ? high[o2] - b_hi : b_lo - low[o2]) > thr and own_wick > own_body
-                    if is_supply and not spike
-                        far := na(far) ? high[o2] : math.max(far, high[o2])
-                    if not is_supply and not spike
-                        far := na(far) ? low[o2] : math.min(far, low[o2])
-                far := na(far) ? (is_supply ? b_hi : b_lo) : far
+                for q = first to k + 1
+                    float rch = math.max(is_supply ? high[q] - b_hi : b_lo - low[q], 0.0)
+                    float own_w = is_supply ? high[q] - math.max(open[q], close[q]) : math.min(open[q], close[q]) - low[q]
+                    if not (rch > thr and own_w > math.abs(close[q] - open[q]))
+                        far := na(far) ? (is_supply ? high[q] : low[q]) : is_supply ? math.max(far, high[q]) : math.min(far, low[q])
+                far := na(far) ? (is_supply ? w_hi : w_lo) : far
             z_top := is_supply ? far : b_hi
             z_btm := is_supply ? b_lo : far
-            // a one candle doji base (body at most a quarter of its range) is wick to body like any base, unless its wick on
-            // the zone's far side (supply: upper, demand: lower) is a stub (under a quarter of a typical body) and the other
-            // wick is longer: the body and a stub are no zone, so it runs from the long wick to the body's far side
-            // (supply: low up to the top of the body; demand: high down to the bottom of the body), the way the trader marks it
             if cnt == 1
-                int od = k + legs + 1
-                float rgd = high[od] - low[od]
+                int od = k + 1
+                float bd = math.abs(close[od] - open[od])
                 float up_w = high[od] - math.max(open[od], close[od])
                 float dn_w = math.min(open[od], close[od]) - low[od]
                 float far_w = is_supply ? up_w : dn_w
                 float near_w = is_supply ? dn_w : up_w
-                if rgd > 0 and math.abs(close[od] - open[od]) <= 0.25 * rgd and far_w <= 0.25 * yard and near_w > far_w
+                if bd <= 0.25 * (high[od] - low[od]) and far_w <= bd and near_w > far_w
                     z_top := is_supply ? math.max(open[od], close[od]) : high[od]
                     z_btm := is_supply ? low[od] : math.min(open[od], close[od])
-        // V-shaped turn: no small base, but the candle next to the impulse holds the extreme.
-        // That candle is the base on its own, wick to body, as long as the impulse (body plus any gap) is at
-        // least as big as it. A candle bigger than the impulse is a drive, not a base. This is how the sheet
-        // draws a one candle base at a V low or V high.
-        if cnt == 0
-            int off = k + 1 + legs
-            // it is the turn only if it holds the extreme on both sides: a candle the one before it out-reached is still
-            // the move in (BTC 5M 19:25 under the 19:20 high, inside the drop off Jay's 19:15 supply)
-            bool holds_extreme = is_supply ? high[off] >= high[k] and high[off] >= nz(high[off + 1]) : low[off] <= low[k] and low[off] <= nz(low[off + 1], low[off])
-            bool normal_size = gap_imp or math.abs(close[off] - open[off]) <= drive
-            if not na(close[off]) and holds_extreme and normal_size
-                z_top := is_supply ? high[off] : math.max(open[off], close[off])
-                z_btm := is_supply ? math.min(open[off], close[off]) : low[off]
-                lt := time[off]
-                cnt := 1
-        if cnt > 0
+            lt := time[first]
             found := true
-        else
-            turn := true
-            t_t0 := na(time[k + 2]) ? time[k + 1] : time[k + 2]
-            t_t1 := time_close[k]
-            t_ext := is_supply ? math.max(high[k], nz(high[k + 1], high[k])) : math.min(low[k], nz(low[k + 1], low[k]))
-    // Drill-down refinement of a multi-candle base is off: the base is now read on its own timeframe (legs set aside, the
-    // arrival candle starts it, spike wicks do not set the far edge), which is how the zones are drawn by hand
-    bool amb = false
-    [found, z_top, z_btm, lt, cnt, time[k], turn, t_t0, t_t1, t_ext, gap_cut, gap_full and found, amb]
+    [found, z_top, z_btm, lt, cnt, time[k], false, int(na), int(na), float(na), false, gap_full and found, false]
 
 // True when price travelled at least dep_mult x zone height beyond the zone edge over the k closed candles starting at the impulse.
 // Also returns the furthest price reached, so the move score counts the follow-through that came before the zone was drawn.
-// The height counted is capped at four typical bodies: a tall zone (a doji base with a long rejection wick) that price
-// left by four typical bodies has departed strongly (BTC 5M 19:15 supply 60873-61484, Jay's marked zone)
+// A real move: price leaves the zone by 1.5 typical bodies (x the Departure input). Jay's marked zones were all left by
+// 1.8 typical bodies or more; a zone's own height is not the measure (a tall spike-wick base still departs)
 dep_need(float top, float btm, float yard) =>
-    math.min(top - btm, na(yard) ? top - btm : 4 * yard) * dep_mult
+    (na(yard) ? top - btm : 1.5 * yard) * dep_mult
 
 departs(bool is_supply, int k, float top, float btm, float yard) =>
     bool ok = false
@@ -541,15 +387,45 @@ candidate(bool is_supply, float yard) =>
         ok2 := f2
         [dep2, m2] = departs(is_supply, dep_bars, t2, b2, yard)
         mx2 := m2
-    bool found = ok1 or ok2
-    float top = ok1 ? t1 : t2
-    float btm = ok1 ? b1 : b2
-    int lt = ok1 ? l1 : l2
-    int n = ok1 ? n1 : n2
-    int it = ok1 ? i1 : i2
-    bool gp = ok1 ? g1 : g2
-    bool go = ok1 ? o1 : o2
-    float mx = ok1 ? mx1 : mx2
+    // One zone per side per candle: when an older base completes its departure on the same candle as a new one, the
+    // older one goes first, and the new one (departed on its own impulse candle) is reported on the next candle
+    // (USOIL 5M 06:05 base and 06:25 base both completing at 06:30)
+    bool okr = false
+    float tr_ = na
+    float br_ = na
+    int lr_ = na
+    int nr_ = na
+    int ir_ = na
+    bool gr_ = false
+    bool or_ = false
+    float mxr = na
+    if use_departure and not ok2
+        [fr, trr, brr, lrr, nrr, irr, tnr, ar, cr, xr, grr, orr, amr] = detect(is_supply, 2, yard)
+        if fr
+            float need_r = dep_need(trr, brr, yard)
+            bool dep_at_imp = is_supply ? low[2] <= brr - need_r : high[2] >= trr + need_r
+            bool alive_r = is_supply ? close[1] <= trr : close[1] >= brr
+            if dep_at_imp and alive_r
+                okr := true
+                tr_ := trr
+                br_ := brr
+                lr_ := lrr
+                nr_ := nrr
+                ir_ := irr
+                gr_ := grr
+                or_ := orr
+                mxr := is_supply ? math.min(low[2], low[1]) : math.max(high[2], high[1])
+    bool use2 = ok2
+    bool use1 = not use2 and ok1
+    bool found = ok1 or ok2 or okr
+    float top = use2 ? t2 : use1 ? t1 : tr_
+    float btm = use2 ? b2 : use1 ? b1 : br_
+    int lt = use2 ? l2 : use1 ? l1 : lr_
+    int n = use2 ? n2 : use1 ? n1 : nr_
+    int it = use2 ? i2 : use1 ? i1 : ir_
+    bool gp = use2 ? g2 : use1 ? g1 : gr_
+    bool go = use2 ? o2 : use1 ? o1 : or_
+    float mx = use2 ? mx2 : use1 ? mx1 : mxr
     // a turn with no clean base counts only once price has departed from the extreme like a zone would
     [tdep1, tmx1] = departs(is_supply, 1, is_supply ? x1 : x1 + yard, is_supply ? x1 - yard : x1, yard)
     [tdep2, tmx2] = departs(is_supply, dep_bars, is_supply ? x2 : x2 + yard, is_supply ? x2 - yard : x2, yard)
@@ -842,7 +718,9 @@ catch_up(array<Zone> zones, bool is_supply, int slot, float c, float h, float l,
 // Adds a reported base as a zone once, keyed by its leftmost candle time.
 add_once(array<Zone> zones, bool is_supply, int slot, bool found, float top, float btm, int lt, int n, int imp_t, float atr_tf, bool gp, bool go, float mx) =>
     if found and not na(lt)
-        int key = lt * 8 + slot * 2 + (is_supply ? 0 : 1)
+        // keyed by the base's first candle and its move out: a base that keeps building from the same first candle (price
+        // pauses longer before it leaves) is reported again and replaces the shorter one (USOIL 1H 23:00-05:00)
+        int key = ((lt / 60000) * 100000 + ((nz(imp_t, lt) - lt) / 60000) % 100000) * 8 + slot * 2 + (is_supply ? 0 : 1)
         if seen_keys.indexof(key) < 0
             seen_keys.unshift(key)
             if seen_keys.size() > 400

@@ -52,6 +52,13 @@ def zones(df, max_base=12, dep_bars=8):
             e = int(np.argmax(bhi[bb])) if sup else int(np.argmin(blo[bb]))
             w = int(np.argmax(h[bb])) if sup else int(np.argmin(l[bb]))
             b = list(bb[min(e, w):])
+            # the candle right before the move out is base only if it is not itself travelling against the rest of the
+            # base (then the move out started there)
+            if len(b) >= 2:
+                lst = b[-1]
+                rest = b[:-1]
+                same_way = c[lst] < blo[rest].min() if sup else c[lst] > bhi[rest].max()
+                if same_way and body[lst] >= 0.45 * rng[lst] and body[lst] > 1.5 * np.median(body[rest]): continue
             # the move out closes beyond the base's bodies
             if not (c[i] < blo[b].min() if sup else c[i] > bhi[b].max()): continue
             # the first base candle is not itself a breakout in the move out's direction (then it is part of the move)

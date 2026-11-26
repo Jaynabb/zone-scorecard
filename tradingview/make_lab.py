@@ -10,10 +10,6 @@ s = s.replace('indicator("Jay S&D",', 'indicator("Jay S&D Lab",', 1)
 old = "    float chk = na        //"
 assert s.count(old) == 1
 s = s.replace(old, "    int lab_tc = 0        // lab: touches already reported\n" + old, 1)
-# lab only: log every zone the entry timeframe creates (base start, impulse, edges), shown in the Pine Logs panel
-old_add = "            create_zone(zones, is_supply, top, btm, lt, slot, atr_tf, n, imp_t, gp, go, false, mx)\n"
-assert s.count(old_add) == 1
-s = s.replace(old_add, old_add + "            if slot == 0\n                log.info((is_supply ? \"SUP \" : \"DEM \") + str.tostring(btm) + \"-\" + str.tostring(top) + \" base \" + str.format_time(lt, \"MM-dd HH:mm\", \"America/New_York\") + \" n \" + str.tostring(n) + \" imp \" + str.format_time(imp_t, \"MM-dd HH:mm\", \"America/New_York\"))\n", 1)
 s += r'''
 
 //-----------------------------------------------------------------------------

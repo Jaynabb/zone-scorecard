@@ -4,6 +4,25 @@ How a supply or demand zone is read from the candles, written down from the zone
 Each rule lists the chart it came from so it can be checked again. When a new marked zone disagrees with a rule,
 the rule is changed here first, then in `jay_sd.pine`.
 
+## 0. How the indicator reads a base (v217, no preset candle sizes)
+
+Read only from where candles sit relative to each other, tested against every zone in `zone_fixtures.csv`
+(`python zone_struct.py <data dir>`, all must pass before a rule change goes on the chart):
+
+- **Move out:** a candle closes beyond the body of the candle before it, and beyond the base's bodies.
+- **Base:** walking back from the move out, a candle is base while its range and the next candle's overlap by at least half
+  (side by side).
+- **Move in:** the walk stops at a travelling candle: body most of its range (45% or more) and over 1.5x the base's
+  median body. The candle right before the move out is also the move if it travels that way and closes past the rest
+  of the base.
+- **Turn:** the base starts at the candle with the most extreme body, or an earlier one holding the extreme wick.
+- **Part of the move:** the first base candle must not itself break out in the move out's direction (BTC 5M 19:25).
+- **Pause:** the base holds a candle whose body is under half its range (no zone at a V top of travelling candles).
+- **Edges:** wick to body; spike wicks left out; a one candle doji whose far wick is shorter than its body runs from the
+  long wick to the body's far side (NQ 1H 16:00).
+- **Real move:** price leaves by 1.5 typical bodies within 8 candles.
+- A base that keeps building from the same first candle replaces its shorter version (USOIL 1H 23:00-05:00).
+
 ## 1. A zone is leg in, base, leg out
 
 - **Leg in:** the move into the base. Full size candles (body more than about 1.5 typical bodies) heading toward

@@ -1707,10 +1707,22 @@ if barstate.islast
     if show_tlines
         array<float> tl_px = array.from(tlh_up, tlh_dn, tlm_up, tlm_dn, tl_low_own ? tll_up : na, tl_low_own ? tll_dn : na)
         array<string> tl_nm = array.from(tf_name(TF2) + " UP", tf_name(TF2) + " DOWN", tf_name(trend_tf) + " UP", tf_name(trend_tf) + " DOWN", tf_name(TF0) + " UP", tf_name(TF0) + " DOWN")
+        // every line gets a name; lines on the same price share one label ("1H UP / 30M UP 61509") so none hides another
         for k = 0 to 5
             float v = tl_px.get(k)
-            if not na(v)
-                tl_labels.push(label.new(bar_index + 3, v, tl_nm.get(k) + " " + str.tostring(v, format.mintick), style=label.style_label_lower_left, color=color.new(color.white, 100), textcolor=k % 2 == 0 ? tl_col_up : tl_col_dn, size=size.tiny))
+            bool first = true
+            if not na(v) and k > 0
+                for q = 0 to k - 1
+                    if tl_px.get(q) == v
+                        first := false
+                        break
+            if not na(v) and first
+                string txt = tl_nm.get(k)
+                if k < 5
+                    for q = k + 1 to 5
+                        if tl_px.get(q) == v
+                            txt += " / " + tl_nm.get(q)
+                tl_labels.push(label.new(bar_index + 1, v, txt + " " + str.tostring(v, format.mintick), style=label.style_label_lower_left, color=color.new(color.black, 30), textcolor=k % 2 == 0 ? tl_col_up : tl_col_dn, size=size.small))
 
 //-----------------------------------------------------------------------------
 // SETUP SCORE AND ALERTS

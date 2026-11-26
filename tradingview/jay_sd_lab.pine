@@ -1,0 +1,2120 @@
+//@version=6
+indicator("Jay S&D Lab", overlay=true, max_bars_back=500, max_boxes_count=500, max_labels_count=500, max_lines_count=100)
+
+//-----------------------------------------------------------------------------
+// SETTINGS
+//-----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
+// TRADING STYLE: the three timeframes. Slot 0 = Low (entry zones, the targets), slot 1 = Mid (trend),
+// slot 2 = High (range and backing). Matches the presets on the Zone Scorecard site.
+//-----------------------------------------------------------------------------
+string style_group = 'Trading Style'
+string style = input.string('Longer Swing (D / W / M)', 'Trading Style', options=['Scalping (5m / 30m / 1H)', 'Scalping (5m / 15m / 1H)', 'Day Trading (1H / 4H / D)', 'Swing Trading (4H / D / W)', 'Longer Swing (D / W / M)', 'Custom'], group=style_group, tooltip='Low / Mid / High timeframes, from the trading sheet. Scalping (short-term): 5 Min / 30 or 15 Min / Hourly. Day trading: 1 hr / 4 hr / Daily. Swing (weekly trading): 4 hr / Daily / Weekly. Longer swing (monthly trading): Daily / Weekly / Monthly. Low is where the entry zones (targets) come from, Mid is the trend, High is the range and the backing. Custom uses the three inputs below; the presets ignore them.')
+string tf_low_in = input.timeframe('D', 'Custom Low Timeframe', group=style_group, tooltip='Only used when Trading Style is Custom.')
+string tf_mid_in = input.timeframe('W', 'Custom Mid Timeframe', group=style_group, tooltip='Only used when Trading Style is Custom.')
+string tf_high_in = input.timeframe('M', 'Custom High Timeframe', group=style_group, tooltip='Only used when Trading Style is Custom.')
+// the custom timeframes apply only with the Custom style; a preset always uses its own three
+bool use_custom = style == 'Custom'
+string TF0 = use_custom ? tf_low_in : style == 'Longer Swing (D / W / M)' ? 'D' : style == 'Swing Trading (4H / D / W)' ? '240' : style == 'Day Trading (1H / 4H / D)' ? '60' : '5'
+string TF1 = use_custom ? tf_mid_in : style == 'Longer Swing (D / W / M)' ? 'W' : style == 'Swing Trading (4H / D / W)' ? 'D' : style == 'Day Trading (1H / 4H / D)' ? '240' : style == 'Scalping (5m / 30m / 1H)' ? '30' : '15'
+string TF2 = use_custom ? tf_high_in : style == 'Longer Swing (D / W / M)' ? 'M' : style == 'Swing Trading (4H / D / W)' ? 'W' : style == 'Day Trading (1H / 4H / D)' ? 'D' : '60'
+if barstate.isfirst and not (timeframe.in_seconds(TF0) < timeframe.in_seconds(TF1) and timeframe.in_seconds(TF1) < timeframe.in_seconds(TF2))
+    runtime.error('Custom timeframes must go Low < Mid < High, for example 5 minutes / 30 minutes / 2 hours.')
+// true on the first chart bar of a new candle of each timeframe
+bool new_d = timeframe.change(TF0)
+bool new_w = timeframe.change(TF1)
+bool new_m = timeframe.change(TF2)
+
+// Readable names: DAILY, WEEKLY, MONTHLY, 4H, 15M ...
+tf_name(string tf) =>
+    int sec = timeframe.in_seconds(tf)
+    sec == timeframe.in_seconds("D") ? "DAILY" : sec == timeframe.in_seconds("W") ? "WEEKLY" : sec == timeframe.in_seconds("M") ? "MONTHLY" : sec % 3600 == 0 ? str.tostring(sec / 3600) + "H" : str.tostring(sec / 60) + "M"
+
+// Short tags for the backing suffix: +W, +M, +4H ...
+tf_tag(string tf) =>
+    int sec = timeframe.in_seconds(tf)
+    sec == timeframe.in_seconds("D") ? "D" : sec == timeframe.in_seconds("W") ? "W" : sec == timeframe.in_seconds("M") ? "M" : sec % 3600 == 0 ? str.tostring(sec / 3600) + "H" : str.tostring(sec / 60) + "M"
+
+string poi_group = 'Zone Settings'
+int max_zones = input.int(60, 'Max Zones Kept Per Timeframe', minval=2, maxval=80, group=poi_group, tooltip='Unbroken zones kept in memory per timeframe and side; the oldest is forgotten when the list is full. Only the nearest ones are drawn, see Zone Filters. Keep this high so an old base far below or above price is still there as a target when price finally returns to it.')
+int typ_len = input.int(20, 'Typical Body Lookback', minval=5, group=poi_group, tooltip='Number of candles used to measure the typical candle body (the median, so a few crash candles do not distort it). Every size rule below is a multiple of this typical body, so the script scales itself to any market and timeframe.')
+float impulse_mult = input.float(1.0, 'Impulse Min Body (x typical body)', minval=0.25, step=0.25, group=poi_group, tooltip='Floor for an impulse candle: its body must be at least this many typical bodies and move away from the base. The real test is relative: every base candle must be small compared with the impulse, see Base Candle Max.')
+float base_mult = input.float(0.5, 'Base Candle Max (x impulse body)', minval=0.1, maxval=1.0, step=0.1, group=poi_group, tooltip='A candle counts as part of the base if its body is at most this fraction of the impulse body (0.5 means the impulse is at least twice every base candle), or if it is a balance candle: body at most half its own range.')
+int base_max = input.int(10, 'Max Base Candles', minval=1, maxval=20, group=poi_group, tooltip='The base is the run of small candles immediately left of the impulse (a pause can run many candles). Each one must share price with the base so far, so the walk stops where the pause started. Supply zone = base wick high to lowest base body. Demand zone = base wick low to highest base body. On a base of two or more candles, a wick that reaches far beyond the base\'s other wicks (over three times their typical reach past the bodies, and longer than its own candle\'s body) is a liquidity spike and does not set the far edge.')
+float box_width = input.float(1.0, 'Fallback Zone Width (x typical body)', step=0.25, group=poi_group, tooltip='Only used when the base has no height, for example a single doji with no wick.')
+int zz_len = input.int(10, 'Zig Zag Swing Length', minval=1, group=poi_group, tooltip='A swing high must be the highest high of this many candles to its left (mirror for lows). Used by the zig zag and the trend readout.')
+int zz_right = input.int(2, 'Swing Confirmation Bars', minval=1, group=poi_group, tooltip='How many candles must close after an extreme before it counts as a swing. Small keeps the swings and the trend readout current; large makes them more certain.')
+
+string filt_group = 'Zone Filters'
+bool use_departure = input.bool(true, 'Require Strong Departure', group=filt_group, tooltip='Keep a zone only if price left it by at least the departure multiple of the zone height within the given number of candles. This is the 2x move rule.')
+float dep_mult = input.float(1.0, 'Departure (x zone height)', minval=0.25, step=0.25, group=filt_group, tooltip='Price must travel at least this many zone heights beyond the zone edge for the zone to count. Your 2x scoring rule still applies on the scorecard; this only decides whether a zone is drawn.')
+int dep_bars = input.int(8, 'Departure Within (candles)', minval=1, maxval=20, group=filt_group, tooltip='A zone appears as soon as the impulse candle alone has departed this far, otherwise once the follow-through has, checked this many candles after the impulse.')
+float max_height_mult = input.float(0.0, 'Max Zone Height (x typical body)', minval=0.0, step=0.5, group=filt_group, tooltip='0 = off (default): every zone is drawn however tall, and the score judges it. Set a number to skip zones taller than that many typical bodies of their own timeframe.')
+int max_touches = input.int(0, 'Remove Zone After N Touches', minval=0, group=filt_group, tooltip='A retest is price coming back into the zone after a candle closed back outside it. 0 = never remove by retests; purity is scored on the sheet instead.')
+bool one_done = input.bool(true, 'One And Done Under 1 Hour', group=filt_group, tooltip='Zones of a timeframe under 1 hour are tradable once: after price comes back for a second touch the zone is no longer a target. It stays drawn faint (Show All Valid Zones) until price closes through it. Your mentor\'s rule; on 5m backtests the first touch was the best one.')
+bool corr_only = input.bool(false, 'Hide Higher Timeframe Zones Without Correlation', group=filt_group, tooltip='Off: higher timeframe zones are drawn as hollow frames wherever they are, which shows where price is heading. On: they are drawn only where they overlap a chart timeframe zone of the same side. Zones from lower timeframes are never drawn either way.')
+int show_n = input.int(3, 'Show Nearest Zones Per Side', minval=1, maxval=20, group=filt_group, tooltip='Per timeframe: draw only this many supply zones above price and demand zones below price. The rest stay in memory and appear when price moves toward them.')
+
+string tf_group = 'Timeframes'
+bool show_d = input.bool(true, 'Low timeframe zones (entry)', group=tf_group)
+bool show_minor = input.bool(true, 'Minor zones (warning only)', group=tf_group, tooltip='Dotted outlines on the chart timeframe at old turning points that never made a full zone (the base candles were too big or price did not move away far enough). Price often stalls there. They are never targets, never scored and never give a GO. A minor zone disappears when a candle closes through it.')
+bool show_w = input.bool(true, 'Mid timeframe zones (trend)', group=tf_group)
+bool show_m = input.bool(true, 'High timeframe zones (range)', group=tf_group)
+bool highlight_nearest = input.bool(true, 'Outline Nearest Zones In White', group=tf_group, tooltip='On the chart timeframe, the closest supply above price and the closest demand below price get a white border and a TARGET label. Higher timeframe frames are never tagged as targets.')
+
+string scan_group = 'Scanner'
+int alert_min = input.int(14, 'Valid Setup Score', minval=0, maxval=20, group=scan_group, tooltip='A target zone whose automatic score reaches this is a valid setup on the board. The alert payload carries every score, so the board can show the rest too.')
+bool alerts_on = input.bool(true, 'Send Setup Alerts', group=scan_group, tooltip='Fires alert() on every bar close with both target zones and their scores as JSON (an empty list when there is no target, so the board can see the alert is alive). Create one alert per symbol: condition Jay S&D, Any alert() function call, Once per bar close, with the webhook URL from the Zone Scorecard site. A 1H chart gives an hourly scan.')
+bool show_score = input.bool(true, 'Show Score In Target Label', group=scan_group, tooltip='Adds a SCORE line to each target label with the indicator\'s own point estimate for every check.')
+float approach_pct = input.float(0.8, 'Approach Alert At (share of the way)', minval=0.1, maxval=0.99, step=0.05, group=scan_group, tooltip='Fires the "Price near a target zone" alert condition when price has covered this share of the distance between the two target zones, heading into one of them. Create a separate alert for it with sound on.')
+string ema_group = 'EMA Confluence'
+bool show_ema = input.bool(true, 'Show EMAs', group=ema_group, tooltip='Draws the three EMAs of the chart timeframe, so they follow the candles on whatever chart is open. The EMA signal, the GO check and the 9 EMA exit still use the Low timeframe (the entry timeframe).')
+int ema_fast_len = input.int(9, 'Fast / Mid / Slow EMA', minval=1, group=ema_group, inline='ema', tooltip='Backtested 2026-11-22 on EURUSD, GBPUSD, gold, BTC and NQ: 9 / 21 / 50 on the Daily chart gave the best results for the full candle rule (about 59% win rate at 1:1 and +0.25R per trade at 1:2, against about breakeven for random entries). The edge was small on 1H and none on 5m.')
+int ema_slow_len = input.int(21, '', minval=1, group=ema_group, inline='ema')
+int ema_long_len = input.int(50, '', minval=1, group=ema_group, inline='ema')
+string ema_rule = input.string('Full candle beyond fast EMA', 'EMA Flip Rule', options=['Full candle beyond fast EMA', 'Close beyond fast EMA', 'Full candle beyond all 3'], group=ema_group, tooltip='Full candle beyond fast EMA: the whole candle, wicks included, must sit above the fast EMA to flip the signal to BUY, or below it to flip to SELL. Close beyond fast EMA: a close on the other side of the fast EMA is enough (earlier, flips more often). Full candle beyond all 3: the whole candle must sit beyond all three EMAs (slowest, the version backtested on 2026-11-22).')
+bool ema_fast_rule = ema_rule == 'Close beyond fast EMA'
+bool ema_full_fast = ema_rule == 'Full candle beyond fast EMA'
+bool ema_required = input.bool(true, 'Require EMA Agreement For GO', group=ema_group, tooltip='On: a target zone is only a GO when the standing EMA signal points its way (buy for demand, sell for supply). Otherwise the label says WAIT FOR EMA. Only applies when the Low timeframe is under 1 hour (Scalping): backtests on 1H and 4H showed the EMA filter there skipped trades that did better than the ones it kept.')
+bool show_ema_sig = input.bool(true, 'Mark EMA Buy / Sell Candles', group=ema_group, tooltip='A small triangle under the candle that flips the EMA signal to BUY and over the candle that flips it to SELL, by the EMA Flip Rule.')
+bool show_exit = input.bool(true, '9 EMA Exit On Target Zones', group=ema_group, tooltip="Trade management after the first retest of a Low timeframe target zone (entry at the near edge, stop at the far edge): at +1R move the stop to breakeven, then exit on the first Low timeframe candle that closes back across the fast EMA. Backtested 2026-11-23 on 5m: +0.14R per trade against -0.05R for a fixed 2R target, and better than fixed 2R in 13 of 15 symbol and timeframe tests. Shown as a TRADE line on the target label with BE and EXIT markers on the chart.")
+color ema_fast_col = input.color(#F5C542, 'Fast / Mid / Slow Colors', group=ema_group, inline='emac')
+color ema_slow_col = input.color(#4FC3F7, '', group=ema_group, inline='emac')
+color ema_long_col = input.color(#B39DDB, '', group=ema_group, inline='emac')
+
+string visual_group = 'Visual Settings'
+color sup_d_col = input.color(#FF6B6B, 'Low TF Supply / Demand', group=visual_group, inline='sd')
+color sup_w_col = input.color(#E03131, 'Mid TF Supply / Demand', group=visual_group, inline='sw')
+color sup_m_col = input.color(#8B0000, 'High TF Supply / Demand', group=visual_group, inline='sm')
+color dem_d_col = input.color(#69DB7C, '', group=visual_group, inline='sd', tooltip='Low timeframe supply and demand colors.')
+color dem_w_col = input.color(#089981, '', group=visual_group, inline='sw', tooltip='Mid timeframe supply and demand colors.')
+color dem_m_col = input.color(#004D40, '', group=visual_group, inline='sm', tooltip='High timeframe supply and demand colors.')
+int transp_d = input.int(78, 'Low TF Fill Transparency', minval=0, maxval=100, group=visual_group)
+int transp_w = input.int(70, 'Mid TF Fill Transparency', minval=0, maxval=100, group=visual_group)
+int transp_m = input.int(60, 'High TF Fill Transparency', minval=0, maxval=100, group=visual_group)
+int width_d = input.int(30, 'Low TF Zone Width (bars)', minval=2, group=visual_group, tooltip='How many chart bars wide each zone is drawn, measured back from the last candle. Daily shortest, Weekly longer, Monthly longest, so a stack of zones shows its correlation by size.')
+int width_w = input.int(60, 'Mid TF Zone Width (bars)', minval=2, group=visual_group)
+int width_m = input.int(90, 'High TF Zone Width (bars)', minval=2, group=visual_group)
+bool anchor_base = input.bool(true, 'Anchor Zones To Their Base Candle', group=visual_group, tooltip='On: each zone starts at the base candle it was built from, like the original drawing. Off: zones use the widths above and end at the right margin.')
+color go_color = input.color(#2ECC71, 'Go Label Color', group=visual_group, tooltip='The target label turns this color when the trade is a go: score at or above the valid score, and price is retesting the zone now (or the impulse gapped away from the base, the one case that needs no retest), and the EMA signal agrees when Require EMA Agreement is on.')
+color highlight_color = input.color(color.white, 'Nearest Zone Outline', group=visual_group)
+int target_tr = input.int(40, 'Target Zone Fill Transparency', minval=0, maxval=100, group=visual_group, tooltip='The two target zones (white outline) use this fill transparency instead of their timeframe value, so they stand out boldly.')
+color label_color = input.color(color.white, 'Text Color', group=visual_group)
+bool show_zigzag = input.bool(false, 'Show Zig Zag (chart timeframe)', group=visual_group)
+bool show_trend = input.bool(true, 'Show Trend Readout', group=visual_group, tooltip='A box in the top right corner with the trend state of the High timeframe (top, for context), the Trend Timeframe (the Mid timeframe, scored) and the Low timeframe, read from the zig zag swings with the 3 segment rule: higher highs and higher lows is UP, lower highs and lower lows is DOWN, anything else is RANGE. The control point is the last higher low (up) or lower high (down); a close through it ends the trend.')
+bool show_fib = input.bool(true, 'Show High Timeframe Fib Range', group=visual_group, tooltip='Draws the range the Range score uses: a fib on the High timeframe (the highest of the three, set by the trading style), zone to zone: from the near edge of the High timeframe supply the last swing high came out of to the near edge of the High timeframe demand the last swing low came out of. An end with no such zone uses the swing price itself. Lines at 0, 25, 50, 75 and 100%. Demand in the bottom 25% scores 2 and below 75% scores 1; supply in the top 25% scores 2 and above 25% scores 1.')
+bool trend_auto = input.bool(true, 'Trend Readout Uses The Mid Timeframe', group=visual_group, tooltip='On: the readout scores the trend of the style\'s Mid timeframe. Off: it uses the Trend Timeframe below.')
+string trend_tf_in = input.timeframe('W', 'Trend Timeframe (when not automatic)', group=visual_group)
+string trend_tf = trend_auto ? TF1 : trend_tf_in
+bool show_labels = input.bool(false, 'Show Swing Labels (chart timeframe)', group=visual_group)
+color zigzag_color = input.color(color.gray, 'ZigZag Color', group=visual_group)
+bool show_zone_info = input.bool(false, 'Zone Facts On Every Box', group=visual_group, tooltip='Prints price range, base candle count, base date and origin (own base, gap refined, or read from the timeframe below) inside every drawn box. For checking a zone against the rules.')
+bool label_targets_only = input.bool(true, 'Label Only The Target Zones', group=visual_group, tooltip='Only the white outlined zones (the nearest on each side) get a label: timeframe, side, price range and the word TARGET, placed in the margin right of the last candle. Other boxes stay unlabeled. Turn off to also print timeframe and side inside every box.')
+// added last so earlier inputs keep their ids and existing chart settings stay put
+bool show_hint = input.bool(true, 'Show How To Take The Trade', group=visual_group, tooltip="Adds a HOW line to each target label: which of the course's three entries the zone calls for and the steps to take it. TOUCH (purity 4, fresh zone): limit order at the near edge. ZONE (purity 2, with the Mid trend): wait for a candle to close inside the zone, then enter inside it. EXIT (purity 0, or counter trend): let price go in and turn, enter when a candle closes back out. Stop past the far edge in all three.")
+int scalp_min = input.int(16, 'Valid Setup Score When Low TF Under 1 Hour', minval=0, maxval=20, group=scan_group, tooltip='Used instead of Valid Setup Score when the Low timeframe is under 1 hour (Scalping). With One And Done on, every tradable zone there is fresh and scores the full 4 for purity, so purity no longer separates setups; the higher bar makes the other checks earn it.')
+bool show_all = input.bool(true, 'Show All Valid Zones', group=visual_group, tooltip='Every zone price has not closed through stays on the chart. The nearest ones per side are drawn in full (Show Nearest Zones Per Side); the rest are drawn as a dashed outline only (green demand, red supply), including zones past their touch limit (One And Done), which are never targets. So when price comes back to old supply or demand it is already marked.')
+float faint_reach = input.float(10.0, 'Faint Zones Within (x typical body)', minval=0.0, step=1.0, group=visual_group, tooltip='Show All Valid Zones draws a faint zone only when it is within this many typical candle bodies of its own timeframe from price (about 10 bodies: the Daily zones a few days of travel away, the Monthly zones a few months away). 0 = no limit. Faint zones of a timeframe below the chart timeframe are never drawn; the nearest zones and targets still are.')
+// the score a GO needs: higher when the Low timeframe is under 1 hour (see scalp_min)
+int go_min = timeframe.in_seconds(TF0) < 3600 ? scalp_min : alert_min
+// EMA agreement only gates a GO when the Low timeframe is under 1 hour. Backtested 2026-11-23 on first touches of fresh
+// zones: on 1H the trades the 9 EMA signal was against did better (+0.10R) than the ones it agreed with (+0.03R), and on
+// 4H the same (+0.07R against, -0.02R with), so above 1 hour the filter only throws away good trades
+bool ema_need = ema_required and timeframe.in_seconds(TF0) < 3600
+
+//-----------------------------------------------------------------------------
+// TYPES, ARRAYS & GLOBALS
+//-----------------------------------------------------------------------------
+type Zone
+    box b
+    int touches = 0
+    bool inside = false
+    int base_n = 0        // number of base candles the zone was built from
+    float depth = 0.0     // deepest retest so far, as a fraction of the zone height (0 to 1)
+    bool os = false       // oppositional structure: the move out of the zone, before any retest, closed through an opposing zone of the same timeframe
+    int lt = 0            // time of the base's first candle
+    bool via_lower = false // zone drawn from the base seen one timeframe below, inside a higher timeframe turn with no clean base
+    float ext = na        // furthest price the move out reached before the first retest
+    bool gap = false      // the base walk stopped at a price gap, so the zone covers only the candles on the impulse side of it
+    bool gap_out = false  // the impulse opened away from the base with a gap: the one case where the trade is a go before any retest
+    int e_t = na          // chart bar time of the first retest: the entry the 9 EMA exit manages
+    int slot = 0          // 0 Low, 1 Mid, 2 High timeframe
+    float d_prev = 0.0    // deepest retest before the latest visit (purity of the latest visit is scored on it)
+    int zc_t = na         // latest visit: chart bar time of the first candle that closed inside the zone (Zone entry)
+    float zc_px = na      // ... and its close
+    int x_t = na          // latest visit: chart bar time of the candle that closed back out past the near edge (Exit entry)
+    float x_px = na       // ... and its close
+    int ct = na           // chart bar time the zone was created (confirmed)
+    bool rr = false       // its base formed inside an older zone (same or higher timeframe) after that zone's impulse: a retest reaction, not a new zone (no trade, never a target)
+    bool retired = false  // past its touch limit (One And Done or Remove After N Touches): still valid supply or demand, drawn faint, never a target
+    int it = na           // open time of the impulse candle (the candles after it are where retests can start)
+    bool fresh = true     // just created: the candles between its impulse and now have not been checked for retests yet
+    int lab_tc = 0        // lab: touches already reported
+    float chk = na        // drill-down only: the furthest close of this timeframe seen between the base and the turn (for checking the rule)
+
+// slot 0 = Low (entry), 1 = Mid, 2 = High; slot 3 = the chart's own timeframe when it is none of the three (its zones
+// are drawn as levels on that timeframe; scoring, targets and trend stay with the trading style)
+var array<Zone> sup_d = array.new<Zone>()
+var array<Zone> dem_d = array.new<Zone>()
+var array<Zone> sup_w = array.new<Zone>()
+var array<Zone> dem_w = array.new<Zone>()
+var array<Zone> sup_m = array.new<Zone>()
+var array<Zone> dem_m = array.new<Zone>()
+var array<Zone> sup_c = array.new<Zone>()
+var array<Zone> dem_c = array.new<Zone>()
+var array<label> tgt_labels = array.new<label>()   // right-margin labels for the target zones, rebuilt on every refresh
+// the target zones picked on the last bar (arrays, because functions may not assign globals), labeled and scored after the trend readout is known
+var array<Zone> tgt_zones = array.new<Zone>()
+var array<bool> tgt_is_sup = array.new<bool>()
+var array<string> tgt_tags = array.new<string>()
+var array<int> tgt_slots = array.new<int>()
+// boxes drawn on the last refresh, with slot * 2 + side and whether drawn in full, so a higher timeframe copy of a level
+// is hidden only when the lower timeframe box is actually on the chart
+var array<box> drawn_b = array.new<box>()
+var array<int> drawn_k = array.new<int>()
+var array<bool> drawn_full = array.new<bool>()
+// record of zone breaks: bar time and key (slot * 2 + side), so a new zone can tell whether its move out broke an opposing zone
+var array<int> brk_t = array.new<int>()
+var array<int> brk_k = array.new<int>()
+var array<int> brk_lt = array.new<int>()   // base time of the zone that broke
+// higher timeframe turns that had an impulse but no clean base, waiting for the timeframe below to supply the base
+var array<int> pt_key = array.new<int>()     // slot * 2 + side
+var array<int> pt_t0 = array.new<int>()      // window start (two candles before the impulse)
+var array<int> pt_t1 = array.new<int>()      // window end (close of the impulse candle)
+var array<float> pt_ext = array.new<float>() // the extreme price of the turn
+var array<int> turn_seen = array.new<int>()
+// keys of bases already turned into zones (left_time * 8 + slot * 2 + side), so a repeated report is not drawn twice
+var array<int> seen_keys = array.new<int>()
+// typical body of each slot's own timeframe (Low, Mid, High), for how far from price a faint zone is still drawn
+var array<float> slot_yard = array.new<float>(4, na)
+
+int chart_sec = timeframe.in_seconds()
+
+// mode per slot: 0 = same as chart, 1 = higher than chart, 2 = lower than chart
+f_mode(string tf) =>
+    int sec = timeframe.in_seconds(tf)
+    sec == chart_sec ? 0 : sec > chart_sec ? 1 : 2
+
+int mode_d = f_mode(TF0)
+int mode_w = f_mode(TF1)
+int mode_m = f_mode(TF2)
+// the chart's own timeframe gets its zones too when the trading style does not include it
+bool show_c = mode_d != 0 and mode_w != 0 and mode_m != 0
+
+// the style slot drawn at the chart's own timeframe (-1 when the chart timeframe is not in the style)
+int chart_slot = mode_d == 0 ? 0 : mode_w == 0 ? 1 : mode_m == 0 ? 2 : -1
+
+// the timeframe a slot reads
+slot_tf(int slot) =>
+    slot == 0 ? TF0 : slot == 1 ? TF1 : slot == 2 ? TF2 : timeframe.period
+
+//-----------------------------------------------------------------------------
+// BASE DETECTION (runs inside each timeframe's own context)
+//-----------------------------------------------------------------------------
+// Looks at the candle k bars back. If it is an impulse (big body, moving away from the base),
+// walks left over the small overlapping candles that form the base and returns the zone.
+// Supply = base wick high down to the lowest base body. Demand = base wick low up to the highest base body.
+// Returns [found, top, btm, left_time, base_count, impulse_time, turn, turn_t0, turn_t1, turn_extreme].
+// turn is true when the impulse qualified but no clean base did: the timeframe below is then asked for the base.
+detect(bool is_supply, int k, float yard) =>
+    float lim = yard * impulse_mult
+    bool found = false
+    float z_top = na
+    float z_btm = na
+    int lt = na
+    int cnt = 0
+    bool turn = false
+    bool gap_cut = false
+    int t_t0 = na
+    int t_t1 = na
+    float t_ext = na
+    int legs = 0
+    float body = math.abs(close[k] - open[k])
+    bool away = is_supply ? close[k] < open[k] : close[k] > open[k]
+    // a gap between this candle and the one before it is part of the impulse: price left the base without trading
+    // there, so the gap counts as impulsive movement (the sheet's rule) and a gap alone can be the impulse.
+    // The gap is measured at the open against the previous candle's body, the way it shows on the chart; a wick
+    // that later dips back into the gap does not undo it
+    float prev_top = math.max(open[k + 1], close[k + 1])
+    float prev_btm = math.min(open[k + 1], close[k + 1])
+    // a gap smaller than a tenth of a typical body is feed noise (24 hour markets open a few cents off the last
+    // close all the time), not price leaving without trading
+    float min_gap = yard * 0.1
+    float gap_raw = is_supply ? math.max(prev_btm - open[k], 0.0) : math.max(open[k] - prev_top, 0.0)
+    float gap_in = gap_raw > min_gap ? gap_raw : 0.0
+    bool gap_imp = gap_in > 0
+    // a full gap: the impulse opened beyond the previous candle's wick, so price never traded back at the base's edge.
+    // This is the "gap away from the zone" that allows an entry before any retest; a gap that only clears the body does not
+    bool gap_full = is_supply ? open[k] < low[k + 1] - min_gap : open[k] > high[k + 1] + min_gap
+    // a candle closing back toward the base adds nothing: only the gap itself can drive then
+    float drive = away ? body + nz(gap_in) : nz(gap_in)
+    // a candle a little under the size rule still drives when price clearly left the base: it closes past the whole
+    // range of the candle before it (wick included) and the move from that candle's far wick (the zone's edge) to this
+    // close is an impulse in size. Chop that stays inside the base candle's range never qualifies
+    float move_out = is_supply ? high[k + 1] - close[k] : close[k] - low[k + 1]
+    bool cleared = is_supply ? close[k] < low[k + 1] : close[k] > high[k + 1]
+    if away and drive < lim and cleared and move_out >= lim
+        drive := move_out
+    if not na(body) and drive >= lim and (away or gap_imp)
+        float base_lim = drive * base_mult
+        float a_lo = na   // full range of the base so far (wicks)
+        float a_hi = na
+        float w_lo = na   // running wick extremes of the base
+        float w_hi = na
+        float bb_lo = na  // running body extremes of the base
+        float bb_hi = na
+        for j = 1 to base_max + 4
+            if cnt >= base_max
+                break
+            int off = k + j
+            // a candle between the base and the impulse that moves the impulse's way and closes beyond the candle
+            // before it (above its high for demand, below its low for supply) is the start of the move, not the base
+            bool leg_c = is_supply ? close[off] < open[off] and close[off] < low[off + 1] : close[off] > open[off] and close[off] > high[off + 1]
+            // a tiny pause candle (body under a quarter of a typical body) inside the leg is still the leg when the candle
+            // before it was a leg candle
+            bool leg_prev = is_supply ? close[off + 1] < open[off + 1] and close[off + 1] < low[off + 2] : close[off + 1] > open[off + 1] and close[off + 1] > high[off + 2]
+            bool tiny = math.abs(close[off] - open[off]) <= 0.25 * yard
+            if cnt == 0 and legs < 4 and (leg_c or (legs > 0 and tiny and leg_prev))
+                legs += 1
+                continue
+            float bd = math.abs(close[off] - open[off])
+            float bh = math.max(open[off], close[off])
+            float bl = math.min(open[off], close[off])
+            // a balance candle (body at most half its own range) belongs to the base whatever the impulse size, as long
+            // as its body is no bigger than the impulse
+            float rg = high[off] - low[off]
+            bool balance = rg > 0 and bd <= rg * 0.5 and bd <= drive
+            // the candle a gap left behind is the base whatever its size: the gap itself is the proof of imbalance
+            if na(bd) or (bd > base_lim and not (j == 1 + legs and gap_imp) and not balance)
+                break
+            // a true gap between two base candles ends the base: only the candles on the impulse side of the gap are
+            // the zone (gap refined), as the sheet draws it. A true gap is the later candle opening beyond the earlier
+            // candle's wick, so price never traded there. An open a tick off the previous body is not a gap (on
+            // intraday charts that cut most bases down to one candle)
+            if cnt > 0 and (open[off - 1] > high[off] + min_gap or open[off - 1] < low[off] - min_gap)
+                gap_cut := true
+                break
+            // each base candle's body must share price with the base so far, so the walk stops where the pause started
+            if cnt > 0 and (bh < a_lo or bl > a_hi)
+                break
+            // a pause is tight: the walk stops before the base's bodies would span more than three typical bodies
+            if cnt > 0 and math.max(nz(bb_hi, bh), bh) - math.min(nz(bb_lo, bl), bl) > 3 * yard
+                break
+            bb_hi := na(bb_hi) ? bh : math.max(bb_hi, bh)
+            bb_lo := na(bb_lo) ? bl : math.min(bb_lo, bl)
+            a_lo := na(a_lo) ? low[off] : math.min(a_lo, low[off])
+            a_hi := na(a_hi) ? high[off] : math.max(a_hi, high[off])
+            cnt += 1
+            w_lo := na(w_lo) ? low[off] : math.min(w_lo, low[off])
+            w_hi := na(w_hi) ? high[off] : math.max(w_hi, high[off])
+            z_top := is_supply ? w_hi : (na(z_top) ? bh : math.max(z_top, bh))
+            z_btm := is_supply ? (na(z_btm) ? bl : math.min(z_btm, bl)) : w_lo
+            lt := time[off]
+        // The turn: the base candle holding the lowest body (demand) or highest body (supply) is where the move into the
+        // base ended. When the candle before it stepped toward it, the older candles walked past belong to that move in,
+        // not to the pause, so the base starts at the turn
+        if cnt >= 2
+            int turn_j = legs + 1
+            float ext_b = na
+            for j2 = legs + 1 to legs + cnt
+                int o2 = k + j2
+                float bb = is_supply ? math.max(open[o2], close[o2]) : math.min(open[o2], close[o2])
+                if na(ext_b) or (is_supply ? bb > ext_b : bb < ext_b)
+                    ext_b := bb
+                    turn_j := j2
+            int o3 = k + turn_j
+            // the candle before the turn stepped toward it (against the impulse, its body further from the turn's
+            // extreme, or level with it: a leg in that closes right where the pause opens is still the leg in): it is the
+            // move in, so the base starts at the turn
+            bool arrival = is_supply ? close[o3 + 1] > open[o3 + 1] and math.max(open[o3 + 1], close[o3 + 1]) <= ext_b : close[o3 + 1] < open[o3 + 1] and math.min(open[o3 + 1], close[o3 + 1]) >= ext_b
+            if arrival and turn_j < legs + cnt
+                cnt := turn_j - legs
+                lt := time[o3]
+            // The base is the candle at the extreme and its neighbours that stay level with it (bodies within a quarter of
+            // a typical body of its far body edge). A candle stepping away from that level ends the base: on the impulse
+            // side it is the move out already under way, on the other side the move in. The zone never holds the move.
+            // The search goes on past the walk's candle limit on the old side, since the candles of the move out do not
+            // count toward it, and a deeper level candle found there becomes the extreme
+            if cnt >= 2
+                int t_j = turn_j
+                float tb_hi = math.max(open[k + t_j], close[k + t_j])
+                float tb_lo = math.min(open[k + t_j], close[k + t_j])
+                float lvl = is_supply ? math.min(tb_lo, tb_hi - 0.25 * yard) : math.max(tb_hi, tb_lo + 0.25 * yard)
+                int j_far = t_j
+                int j_lim = legs + cnt + base_max
+                while j_far + 1 <= j_lim
+                    int o4 = k + j_far + 1
+                    if na(open[o4]) or na(close[o4])
+                        break
+                    float b4_hi = math.max(open[o4], close[o4])
+                    float b4_lo = math.min(open[o4], close[o4])
+                    // a full size candle is a move (in or out), never base
+                    if b4_hi - b4_lo > 1.5 * yard
+                        break
+                    bool deeper = is_supply ? b4_hi > tb_hi : b4_lo < tb_lo
+                    bool level = is_supply ? b4_lo >= lvl : b4_hi <= lvl
+                    if deeper and level
+                        // a level candle reaching further is the new extreme: the level is measured from it
+                        t_j := j_far + 1
+                        tb_hi := b4_hi
+                        tb_lo := b4_lo
+                        lvl := is_supply ? math.min(tb_lo, tb_hi - 0.25 * yard) : math.max(tb_hi, tb_lo + 0.25 * yard)
+                    else if not level
+                        break
+                    j_far += 1
+                // impulse side: the base runs to the last candle whose body comes back to the extreme (within 0.6 of a
+                // typical body). A sideways base that steps away and returns is all base; once price leaves and does not
+                // come back, the candles after the last return are the move out
+                int j_near = t_j
+                float t_body_ext = is_supply ? math.max(open[k + t_j], close[k + t_j]) : math.min(open[k + t_j], close[k + t_j])
+                if t_j - 1 >= legs + 1
+                    for jj = legs + 1 to t_j - 1
+                        int o4 = k + jj
+                        float back = is_supply ? t_body_ext - math.max(open[o4], close[o4]) : math.min(open[o4], close[o4]) - t_body_ext
+                        if back <= 0.6 * yard
+                            j_near := jj
+                            break
+                // then on toward the impulse while candles stay inside the range of bodies the base has already set
+                float rb_hi = na
+                float rb_lo = na
+                for jj = j_near to j_far
+                    rb_hi := na(rb_hi) ? math.max(open[k + jj], close[k + jj]) : math.max(rb_hi, math.max(open[k + jj], close[k + jj]))
+                    rb_lo := na(rb_lo) ? math.min(open[k + jj], close[k + jj]) : math.min(rb_lo, math.min(open[k + jj], close[k + jj]))
+                while j_near - 1 >= legs + 1
+                    int o4 = k + j_near - 1
+                    if math.max(open[o4], close[o4]) > rb_hi + 0.25 * yard or math.min(open[o4], close[o4]) < rb_lo - 0.25 * yard
+                        break
+                    j_near -= 1
+                // candles between the extreme and an older one that the new level leaves out are trimmed from the far side
+                int j_back = j_far
+                while j_back > t_j
+                    int o4 = k + j_back
+                    if is_supply ? math.min(open[o4], close[o4]) < lvl : math.max(open[o4], close[o4]) > lvl
+                        j_back -= 1
+                    else
+                        break
+                j_far := j_back
+                legs := j_near - 1
+                cnt := j_far - j_near + 1
+                lt := time[k + j_far]
+        // Spike wicks: on a base of two or more candles, the far edge is the most extreme wick that is not a spike (see
+        // below). A spike is a liquidity grab inside the pause, not where the zone ends; the wick to body rule still holds
+        // for the wicks that remain.
+        // The near edge is the most extreme body (wick to body)
+        if cnt >= 1
+            float b_lo = na
+            float b_hi = na
+            float w_ext = na
+            for j2 = legs + 1 to legs + cnt
+                int o2 = k + j2
+                b_lo := na(b_lo) ? math.min(open[o2], close[o2]) : math.min(b_lo, math.min(open[o2], close[o2]))
+                b_hi := na(b_hi) ? math.max(open[o2], close[o2]) : math.max(b_hi, math.max(open[o2], close[o2]))
+                w_ext := is_supply ? (na(w_ext) ? high[o2] : math.max(w_ext, high[o2])) : (na(w_ext) ? low[o2] : math.min(w_ext, low[o2]))
+            float far = w_ext
+            if cnt >= 2
+                // a wick is a spike only when it reaches far beyond the base's other wicks: more than three times their
+                // typical (median) reach past the bodies, and at least a quarter of the base height. When every candle
+                // in the base has a long wick, the wicks are the zone
+                array<float> reach = array.new<float>()
+                for j2 = legs + 1 to legs + cnt
+                    int o2 = k + j2
+                    reach.push(math.max(is_supply ? high[o2] - b_hi : b_lo - low[o2], 0.0))
+                float thr = math.max(3 * reach.median(), 0.25 * math.max(b_hi - b_lo, yard))
+                far := na
+                for j2 = legs + 1 to legs + cnt
+                    int o2 = k + j2
+                    // and it is longer than its own candle's body: a rejection spike. A wick shorter than its body is part
+                    // of the pause however far it reaches
+                    float own_body = math.abs(close[o2] - open[o2])
+                    float own_wick = is_supply ? high[o2] - math.max(open[o2], close[o2]) : math.min(open[o2], close[o2]) - low[o2]
+                    bool spike = (is_supply ? high[o2] - b_hi : b_lo - low[o2]) > thr and own_wick > own_body
+                    if is_supply and not spike
+                        far := na(far) ? high[o2] : math.max(far, high[o2])
+                    if not is_supply and not spike
+                        far := na(far) ? low[o2] : math.min(far, low[o2])
+                far := na(far) ? (is_supply ? b_hi : b_lo) : far
+            z_top := is_supply ? far : b_hi
+            z_btm := is_supply ? b_lo : far
+            // a one candle doji base (body at most a quarter of its range) is wick to body like any base, unless its wick on
+            // the zone's far side (supply: upper, demand: lower) is a stub (under a quarter of a typical body) and the other
+            // wick is longer: the body and a stub are no zone, so it runs from the long wick to the body's far side
+            // (supply: low up to the top of the body; demand: high down to the bottom of the body), the way the trader marks it
+            if cnt == 1
+                int od = k + legs + 1
+                float rgd = high[od] - low[od]
+                float up_w = high[od] - math.max(open[od], close[od])
+                float dn_w = math.min(open[od], close[od]) - low[od]
+                float far_w = is_supply ? up_w : dn_w
+                float near_w = is_supply ? dn_w : up_w
+                if rgd > 0 and math.abs(close[od] - open[od]) <= 0.25 * rgd and far_w <= 0.25 * yard and near_w > far_w
+                    z_top := is_supply ? math.max(open[od], close[od]) : high[od]
+                    z_btm := is_supply ? low[od] : math.min(open[od], close[od])
+        // V-shaped turn: no small base, but the candle next to the impulse holds the extreme.
+        // That candle is the base on its own, wick to body, as long as the impulse (body plus any gap) is at
+        // least as big as it. A candle bigger than the impulse is a drive, not a base. This is how the sheet
+        // draws a one candle base at a V low or V high.
+        if cnt == 0
+            int off = k + 1 + legs
+            bool holds_extreme = is_supply ? high[off] >= high[k] : low[off] <= low[k]
+            bool normal_size = gap_imp or math.abs(close[off] - open[off]) <= drive
+            if not na(close[off]) and holds_extreme and normal_size
+                z_top := is_supply ? high[off] : math.max(open[off], close[off])
+                z_btm := is_supply ? math.min(open[off], close[off]) : low[off]
+                lt := time[off]
+                cnt := 1
+        if cnt > 0
+            found := true
+        else
+            turn := true
+            t_t0 := na(time[k + 2]) ? time[k + 1] : time[k + 2]
+            t_t1 := time_close[k]
+            t_ext := is_supply ? math.max(high[k], nz(high[k + 1], high[k])) : math.min(low[k], nz(low[k + 1], low[k]))
+    // Drill-down refinement of a multi-candle base is off: the base is now read on its own timeframe (legs set aside, the
+    // arrival candle starts it, spike wicks do not set the far edge), which is how the zones are drawn by hand
+    bool amb = false
+    [found, z_top, z_btm, lt, cnt, time[k], turn, t_t0, t_t1, t_ext, gap_cut, gap_full and found, amb]
+
+// True when price travelled at least dep_mult x zone height beyond the zone edge over the k closed candles starting at the impulse.
+// Also returns the furthest price reached, so the move score counts the follow-through that came before the zone was drawn.
+departs(bool is_supply, int k, float top, float btm, float yard) =>
+    bool ok = false
+    float out = na
+    float need = (top - btm) * dep_mult
+    if not na(top) and not na(btm) and k >= 1
+        float ext = na
+        for i = 1 to k
+            int off = k - i + 1
+            ext := is_supply ? (na(ext) ? low[off] : math.min(ext, low[off])) : (na(ext) ? high[off] : math.max(ext, high[off]))
+        ok := is_supply ? ext <= btm - need : ext >= top + need
+        out := ext
+    [ok, out]
+
+// One candidate per side per bar: an impulse that closed last bar and already departed far enough,
+// otherwise an impulse up to dep_bars ago whose follow-through departed far enough on the last closed candle.
+candidate(bool is_supply, float yard) =>
+    [f1, t1, b1, l1, n1, i1, tn1, a1, c1, x1, g1, o1, am1] = detect(is_supply, 1, yard)
+    [dep1, mx1] = departs(is_supply, 1, t1, b1, yard)
+    bool ok1 = f1 and (not use_departure or dep1)
+    [f2, t2, b2, l2, n2, i2, tn2, a2, c2, x2, g2, o2, am2] = detect(is_supply, dep_bars, yard)
+    float mx2 = na
+    bool ok2 = false
+    // otherwise the zone appears on the candle its follow-through completes the departure: an impulse k candles back
+    // (k = 2 to dep_bars) that had not departed by the candle before and has now. Waiting the full dep_bars candles
+    // showed a zone late, after its first retests had already printed
+    if use_departure and dep_bars >= 2
+        for k = 2 to dep_bars
+            [fk, tk, bk, lk, nk, ik, tnk, ak, ck, xk, gk, ok_, amk] = detect(is_supply, k, yard)
+            if fk
+                [depk, mxk] = departs(is_supply, k, tk, bk, yard)
+                float need = (tk - bk) * dep_mult
+                // reached on the last closed candle only: everything from the impulse to the candle before fell short
+                float prev = na
+                for i = 2 to k
+                    prev := is_supply ? (na(prev) ? low[i] : math.min(prev, low[i])) : (na(prev) ? high[i] : math.max(prev, high[i]))
+                bool newly = depk and not (is_supply ? prev <= bk - need : prev >= tk + need)
+                // dead on arrival if a candle since the impulse closed through its far edge
+                bool alive = true
+                if newly and k > 1
+                    for i = 1 to k - 1
+                        if is_supply ? close[i] > tk : close[i] < bk
+                            alive := false
+                            break
+                if newly and alive
+                    ok2 := true
+                    t2 := tk
+                    b2 := bk
+                    l2 := lk
+                    n2 := nk
+                    i2 := ik
+                    g2 := gk
+                    o2 := ok_
+                    am2 := amk
+                    mx2 := mxk
+                    break
+    else if not use_departure
+        ok2 := f2
+        [dep2, m2] = departs(is_supply, dep_bars, t2, b2, yard)
+        mx2 := m2
+    bool found = ok1 or ok2
+    float top = ok1 ? t1 : t2
+    float btm = ok1 ? b1 : b2
+    int lt = ok1 ? l1 : l2
+    int n = ok1 ? n1 : n2
+    int it = ok1 ? i1 : i2
+    bool gp = ok1 ? g1 : g2
+    bool go = ok1 ? o1 : o2
+    float mx = ok1 ? mx1 : mx2
+    // a turn with no clean base counts only once price has departed from the extreme like a zone would
+    [tdep1, tmx1] = departs(is_supply, 1, is_supply ? x1 : x1 + yard, is_supply ? x1 - yard : x1, yard)
+    [tdep2, tmx2] = departs(is_supply, dep_bars, is_supply ? x2 : x2 + yard, is_supply ? x2 - yard : x2, yard)
+    bool td1 = tn1 and (not use_departure or tdep1)
+    bool td2 = tn2 and (not use_departure or tdep2)
+    bool turn = not found and (td1 or td2)
+    int tt0 = td1 ? a1 : a2
+    int tt1 = td1 ? c1 : c2
+    float tx = td1 ? x1 : x2
+    // an unclear base (leg candles set aside, several candles left) is drawn now and also sent to the timeframe below,
+    // which refines it to the base it finds at the extreme between the base's first candle and the impulse
+    if found and (ok1 ? am1 : am2)
+        turn := true
+        tt0 := lt
+        tt1 := it
+        tx := is_supply ? top : btm
+    [found, top, btm, lt, n, it, turn, tt0, tt1, tx, gp, go, mx]
+
+// Everything a timeframe reports each bar.
+tf_pack() =>
+    float yard = ta.median(math.abs(close - open), typ_len)
+    [s_f, s_top, s_btm, s_t, s_n, s_i, s_tn, s_a, s_c, s_x, s_g, s_o, s_m] = candidate(true, yard)
+    [d_f, d_top, d_btm, d_t, d_n, d_i, d_tn, d_a, d_c, d_x, d_g, d_o, d_m] = candidate(false, yard)
+    [s_f, s_top, s_btm, s_t, s_n, s_i, d_f, d_top, d_btm, d_t, d_n, d_i, close, high, low, yard, s_tn, s_a, s_c, s_x, d_tn, d_a, d_c, d_x, s_g, d_g, s_o, d_o, s_m, d_m]
+
+//-----------------------------------------------------------------------------
+// DATA REQUESTS
+// Higher or equal timeframes use request.security. Lower timeframes (for example
+// Daily zones on a Weekly chart) use request.security_lower_tf. A slot that does
+// not apply just requests the chart timeframe and is ignored later.
+//-----------------------------------------------------------------------------
+string tf_d_hi = mode_d == 1 ? TF0 : timeframe.period
+string tf_w_hi = mode_w == 1 ? TF1 : timeframe.period
+string tf_m_hi = mode_m == 1 ? TF2 : timeframe.period
+string tf_d_lo = mode_d == 2 ? TF0 : timeframe.period
+string tf_w_lo = mode_w == 2 ? TF1 : timeframe.period
+string tf_m_lo = mode_m == 2 ? TF2 : timeframe.period
+// Lower-timeframe requests return 24 arrays per bar, which TradingView lists as the heaviest thing a script can hold in
+// memory. On a chart that needs no drill-down (every alert chart) they are cut to a handful of bars so the alert server
+// does not run out of memory and stop the alert with a calculation error.
+// (computed inline because calc_bars_count needs a simple int, and a user function would return a series)
+int lo_bars_d = timeframe.in_seconds(TF0) < chart_sec ? 100000 : 5
+int lo_bars_w = timeframe.in_seconds(TF1) < chart_sec ? 100000 : 5
+int lo_bars_m = timeframe.in_seconds(TF2) < chart_sec ? 100000 : 5
+
+[d_sf, d_st, d_sb, d_stm, d_sn, d_si, d_df, d_dt, d_db, d_dtm, d_dn, d_di, d_c, d_h, d_l, d_a, d_stn, d_st0, d_st1, d_stx, d_dtn, d_dt0, d_dt1, d_dtx, d_sg, d_dg, d_so, d_do, d_sm, d_dm] = request.security(syminfo.tickerid, tf_d_hi, tf_pack())
+[w_sf, w_st, w_sb, w_stm, w_sn, w_si, w_df, w_dt, w_db, w_dtm, w_dn, w_di, w_c, w_h, w_l, w_a, w_stn, w_st0, w_st1, w_stx, w_dtn, w_dt0, w_dt1, w_dtx, w_sg, w_dg, w_so, w_do, w_sm, w_dm] = request.security(syminfo.tickerid, tf_w_hi, tf_pack())
+[m_sf, m_st, m_sb, m_stm, m_sn, m_si, m_df, m_dt, m_db, m_dtm, m_dn, m_di, m_c, m_h, m_l, m_a, m_stn, m_st0, m_st1, m_stx, m_dtn, m_dt0, m_dt1, m_dtx, m_sg, m_dg, m_so, m_do, m_sm, m_dm] = request.security(syminfo.tickerid, tf_m_hi, tf_pack())
+
+[c_sf, c_st, c_sb, c_stm, c_sn, c_si, c_df, c_dt, c_db, c_dtm, c_dn, c_di, c_c, c_h, c_l, c_a, c_stn, c_st0, c_st1, c_stx, c_dtn, c_dt0, c_dt1, c_dtx, c_sg, c_dg, c_so, c_do, c_sm, c_dm] = request.security(syminfo.tickerid, timeframe.period, tf_pack())
+
+[d_sf_a, d_st_a, d_sb_a, d_stm_a, d_sn_a, d_si_a, d_df_a, d_dt_a, d_db_a, d_dtm_a, d_dn_a, d_di_a, d_c_a, d_h_a, d_l_a, d_a_a, d_stn_a, d_st0_a, d_st1_a, d_stx_a, d_dtn_a, d_dt0_a, d_dt1_a, d_dtx_a, d_sg_a, d_dg_a, d_so_a, d_do_a, d_sm_a, d_dm_a] = request.security_lower_tf(syminfo.tickerid, tf_d_lo, tf_pack(), calc_bars_count=lo_bars_d)
+[w_sf_a, w_st_a, w_sb_a, w_stm_a, w_sn_a, w_si_a, w_df_a, w_dt_a, w_db_a, w_dtm_a, w_dn_a, w_di_a, w_c_a, w_h_a, w_l_a, w_a_a, w_stn_a, w_st0_a, w_st1_a, w_stx_a, w_dtn_a, w_dt0_a, w_dt1_a, w_dtx_a, w_sg_a, w_dg_a, w_so_a, w_do_a, w_sm_a, w_dm_a] = request.security_lower_tf(syminfo.tickerid, tf_w_lo, tf_pack(), calc_bars_count=lo_bars_w)
+[m_sf_a, m_st_a, m_sb_a, m_stm_a, m_sn_a, m_si_a, m_df_a, m_dt_a, m_db_a, m_dtm_a, m_dn_a, m_di_a, m_c_a, m_h_a, m_l_a, m_a_a, m_stn_a, m_st0_a, m_st1_a, m_stx_a, m_dtn_a, m_dt0_a, m_dt1_a, m_dtx_a, m_sg_a, m_dg_a, m_so_a, m_do_a, m_sm_a, m_dm_a] = request.security_lower_tf(syminfo.tickerid, tf_m_lo, tf_pack(), calc_bars_count=lo_bars_m)
+
+//-----------------------------------------------------------------------------
+// ZONE FUNCTIONS
+//-----------------------------------------------------------------------------
+zone_style(int slot) =>
+    int w = slot == 2 ? 2 : 1
+    int tr = slot == 2 ? transp_m : slot == 1 ? transp_w : transp_d
+    string nm = tf_name(slot_tf(slot))
+    [w, tr, nm]
+
+zone_color(int slot, bool is_supply) =>
+    is_supply ? (slot == 2 ? sup_m_col : slot == 1 ? sup_w_col : sup_d_col) : (slot == 2 ? dem_m_col : slot == 1 ? dem_w_col : dem_d_col)
+
+zone_width(int slot) =>
+    slot == 2 ? width_m : slot == 1 ? width_w : width_d
+
+// true when any zone in the list overlaps the price range
+method any_overlap(array<Zone> zones, float top, float btm) =>
+    bool hit = false
+    if zones.size() > 0
+        for i = 0 to zones.size() - 1
+            box ob = zones.get(i).b
+            if top >= ob.get_bottom() and btm <= ob.get_top()
+                hit := true
+                break
+    hit
+
+// Higher timeframe backing for a zone of the given slot: returns [count, tag] such as [2, " +W +M"].
+backing(int slot, bool is_supply, box b) =>
+    float top = b.get_top()
+    float btm = b.get_bottom()
+    int cnt = 0
+    string tag = ""
+    if slot < 1 and show_w
+        if (is_supply ? sup_w : dem_w).any_overlap(top, btm)
+            cnt += 1
+            tag := tag + " +" + tf_tag(TF1)
+    if slot < 2 and show_m
+        if (is_supply ? sup_m : dem_m).any_overlap(top, btm)
+            cnt += 1
+            tag := tag + " +" + tf_tag(TF2)
+    [cnt, tag]
+
+// Label text: timeframe, side, price range, TARGET, higher timeframe backing, then the facts the scorer needs:
+// base candle count, retest count with the deepest retest as a share of the zone, and oppositional structure.
+zone_text(int slot, bool is_supply, Zone z, string tag, string extra, string status) =>
+    [w, tr, nm] = zone_style(slot)
+    box b = z.b
+    // three short lines keep the label narrow enough to clear the price axis
+    string facts = "base " + str.tostring(z.base_n) + " | touches " + str.tostring(z.touches) + (z.touches > 0 ? " (" + str.tostring(math.round(z.depth * 100)) + "% deep)" : "") + " | OS " + (z.os ? "yes" : "no") + (z.gap ? " | gap refined" : "") + (z.via_lower ? " | base read on " + tf_name(slot == 2 ? TF1 : TF0) : "")
+    nm + (is_supply ? " SUPPLY" : " DEMAND") + " " + str.tostring(b.get_bottom(), format.mintick) + " - " + str.tostring(b.get_top(), format.mintick) + "\nTARGET" + tag + (status == "" ? "" : " | " + status) + "\n" + facts + (extra != "" ? "\n" + extra : "")
+
+// Puts the target label in the empty space to the right of the last candle, where no candle can cover it.
+mark_target(int slot, bool is_supply, Zone z, string tag, string extra, string status, bool go) =>
+    box b = z.b
+    float mid = (b.get_top() + b.get_bottom()) / 2
+    // just outside the box's right end, extending into the right margin. Green when the trade is a go
+    label l = label.new(bar_index + 6, mid, zone_text(slot, is_supply, z, tag, extra, status), xloc=xloc.bar_index, style=label.style_label_left, color=go ? go_color : highlight_color, textcolor=color.black, size=size.small)
+    tgt_labels.push(l)
+
+// When the list is full, forget the zone farthest from price: the zones near price are the ones in play, whether fresh,
+// touched or past their touches, and a valid zone close to price must never be dropped for an old one far away
+method trim(array<Zone> zones, int limit) =>
+    while zones.size() > limit
+        int drop = zones.size() - 1
+        float far_d = -1.0
+        for i = 0 to zones.size() - 1
+            box zb = zones.get(i).b
+            float d = math.max(zb.get_bottom() - close, close - zb.get_top(), 0.0)
+            if d > far_d
+                far_d := d
+                drop := i
+        Zone z = zones.remove(drop)
+        z.b.delete()
+
+// true when the new price range touches an existing untested zone of the same timeframe and side.
+// A zone price has already come back to test does not block a new base inside it: both are kept
+method overlaps(array<Zone> zones, float top, float btm) =>
+    bool hit = false
+    if zones.size() > 0
+        for i = 0 to zones.size() - 1
+            Zone oz = zones.get(i)
+            if oz.touches == 0 and top >= oz.b.get_bottom() and btm <= oz.b.get_top()
+                hit := true
+                break
+    hit
+
+// True when an opposing zone of the same timeframe broke during the move out of this base: a recorded break
+// on the opposite side, between the base's first candle and the impulse candle (one chart bar of slack each way).
+broke_opposing(int slot, bool is_supply, int left_time, int imp_t) =>
+    bool hit = false
+    int key = slot * 2 + (is_supply ? 1 : 0)
+    int slack = timeframe.in_seconds() * 1000
+    if brk_t.size() > 0 and not na(left_time)
+        int hi = na(imp_t) ? time : imp_t
+        for i = 0 to brk_t.size() - 1
+            if brk_k.get(i) == key and brk_lt.get(i) < left_time and brk_t.get(i) >= left_time - slack and brk_t.get(i) <= hi + slack
+                hit := true
+                break
+    hit
+
+// z_top, z_btm = zone edges from the base
+// yard_tf = typical (median) candle body of the zone's own timeframe
+// n = number of base candles, imp_t = time of the impulse candle
+create_zone(array<Zone> zones, bool is_supply, float z_top, float z_btm, int left_time, int slot, float yard_tf, int n, int imp_t, bool gp, bool go, bool from_lower, float mx) =>
+    float buffer = yard_tf * box_width
+    bool flat = na(z_top) or na(z_btm) or (z_top - z_btm) <= syminfo.mintick
+    float anchor = is_supply ? z_top : z_btm
+    float top = flat ? (is_supply ? anchor : anchor + buffer) : z_top
+    float btm = flat ? (is_supply ? anchor - buffer : anchor) : z_btm
+    bool ok = not na(top) and not na(btm)
+    // off by default (0): a tall zone is still a zone, and the move check in the score judges it. The 2x move is a
+    // scoring rule, so it must not decide what gets drawn: hiding a zone hides supply or demand price can react to
+    if max_height_mult > 0 and (top - btm) > max_height_mult * yard_tf
+        ok := false
+    // A zone read from the timeframe's own base replaces an overlapping zone only when that zone is a drill-down
+    // guess or a later base. An older zone that is still valid (never closed through) is always kept. If price has
+    // retested it, a new base forming inside it is drawn as well (a new zone closer to price, worth noting). If it is
+    // untested, the newcomer is skipped: a base formed during the first move out of a zone is a continuation
+    if ok and not from_lower and zones.size() > 0
+        for i = zones.size() - 1 to 0
+            Zone oz = zones.get(i)
+            bool over = top >= oz.b.get_bottom() and btm <= oz.b.get_top()
+            if over and (oz.via_lower or oz.lt >= left_time)
+                oz.b.delete()
+                zones.remove(i)
+    // A base that forms inside an older zone of the same side after that zone's impulse is a retest reaction, not a new
+    // zone: it is drawn faint and is never a target (see flag_reactions); the older zone keeps its own range
+    if ok and not zones.overlaps(top, btm)
+        [w, tr, nm] = zone_style(slot)
+        color base = zone_color(slot, is_supply)
+        box b = box.new(left_time, top, time, btm, xloc=xloc.bar_time, border_color=base, border_width=w, bgcolor=color.new(base, tr), text="", text_color=label_color, text_size=size.small, text_halign=slot == 0 ? text.align_right : slot == 1 ? text.align_center : text.align_left, text_valign=text.align_center, extend=extend.none)
+        Zone z = Zone.new(b)
+        z.slot := slot
+        z.base_n := n
+        z.lt := left_time
+        z.gap := gp
+        z.gap_out := go
+        z.ext := mx
+        z.it := imp_t
+        z.ct := time
+        z.os := broke_opposing(slot, is_supply, left_time, imp_t)
+        zones.unshift(z)
+        zones.trim(max_zones)
+
+// Break: a candle of the zone's own timeframe closes through the wick edge.
+// Retest: price comes back into the zone after a candle closed back outside it. Consecutive candles inside the zone
+// are one visit. A candle that wicks in and closes outside ends the visit, so the next entry is a new retest.
+// One candle of the zone's own timeframe against one zone. t is the chart bar time the candle is stamped with.
+// Returns 0 keep, 1 broken (a close through the wick edge). Past its touch limit a zone is marked retired.
+step(Zone z, bool is_supply, int slot, float c, float h, float l, int t) =>
+    int res = 0
+    box b = z.b
+    float limit_level = is_supply ? b.get_top() : b.get_bottom()
+    bool broken = is_supply ? c >= limit_level : c <= limit_level
+    if broken
+        brk_t.unshift(t)
+        brk_k.unshift(slot * 2 + (is_supply ? 0 : 1))
+        brk_lt.unshift(z.lt)
+        if brk_t.size() > 300
+            brk_t.pop()
+            brk_k.pop()
+            brk_lt.pop()
+        res := 1
+    else
+        bool touching = is_supply ? h >= b.get_bottom() : l <= b.get_top()
+        bool closed_out = is_supply ? c < b.get_bottom() : c > b.get_top()
+        if z.touches == 0
+            z.ext := is_supply ? (na(z.ext) ? l : math.min(z.ext, l)) : (na(z.ext) ? h : math.max(z.ext, h))
+        bool was_in = z.inside or touching
+        if touching and not z.inside
+            z.touches += 1
+            z.d_prev := z.depth
+            z.zc_t := na
+            z.zc_px := na
+            z.x_t := na
+            z.x_px := na
+            if z.touches == 1
+                z.e_t := t
+        // the two confirmations the Zone and Exit entries wait for, once per visit
+        if touching and not closed_out and na(z.zc_t)
+            z.zc_t := t
+            z.zc_px := c
+        if was_in and closed_out and na(z.x_t)
+            z.x_t := t
+            z.x_px := c
+        if touching
+            float hgt = b.get_top() - b.get_bottom()
+            if hgt > 0
+                float pen = is_supply ? (h - b.get_bottom()) / hgt : (b.get_top() - l) / hgt
+                z.depth := math.max(z.depth, math.min(math.max(pen, 0.0), 1.0))
+        z.inside := touching and not closed_out
+        int tlim = one_done and timeframe.in_seconds(slot_tf(slot)) < 3600 ? 1 : max_touches
+        // past the touch limit the zone is no longer tradable, but price has not closed through it, so it stays on the
+        // chart as a faint reference
+        if tlim > 0 and z.touches > tlim
+            z.retired := true
+    res
+
+monitor(array<Zone> zones, bool is_supply, int slot, float c, float h, float l) =>
+    if zones.size() > 0 and not na(c)
+        for i = zones.size() - 1 to 0
+            Zone z = zones.get(i)
+            if step(z, is_supply, slot, c, h, l, time) > 0
+                z.b.delete()
+                zones.remove(i)
+
+// A zone confirmed late (its follow-through departed only some candles after the impulse) did not exist while those
+// candles printed, so retests among them went uncounted and the zone read as fresh. On its first bar, replay the
+// chart bars since the impulse candle closed through the same per-candle check, oldest first.
+catch_up(array<Zone> zones, bool is_supply, int slot, float c, float h, float l, bool htf, bool tfn) =>
+    if zones.size() > 0
+        int tf_ms = timeframe.in_seconds(slot_tf(slot)) * 1000
+        for i = zones.size() - 1 to 0
+            Zone z = zones.get(i)
+            if z.fresh
+                z.fresh := false
+                int res = 0
+                if not na(z.it)
+                    int n = 0
+                    for q = 1 to 300
+                        if na(time[q]) or time[q] < z.it + tf_ms
+                            break
+                        n := q
+                    if n > 0
+                        for q = n to 1
+                            // a higher timeframe zone is stepped once per finished candle, the way monitor does it
+                            if htf ? (tfn[q] and not na(c[q + 1]) and time[q + 1] >= z.it + tf_ms) : not na(c[q])
+                                res := htf ? step(z, is_supply, slot, c[q + 1], h[q + 1], l[q + 1], time[q]) : step(z, is_supply, slot, c[q], h[q], l[q], time[q])
+                                if res > 0
+                                    break
+                if res > 0
+                    z.b.delete()
+                    zones.remove(i)
+
+// Adds a reported base as a zone once, keyed by its leftmost candle time.
+add_once(array<Zone> zones, bool is_supply, int slot, bool found, float top, float btm, int lt, int n, int imp_t, float atr_tf, bool gp, bool go, float mx) =>
+    if found and not na(lt)
+        int key = lt * 8 + slot * 2 + (is_supply ? 0 : 1)
+        if seen_keys.indexof(key) < 0
+            seen_keys.unshift(key)
+            if seen_keys.size() > 400
+                seen_keys.pop()
+            create_zone(zones, is_supply, top, btm, lt, slot, atr_tf, n, imp_t, gp, go, false, mx)
+
+// Oppositional structure covers the whole directional move out of the zone, not just the impulse candle:
+// until the zone's first retest, any close through an opposing zone of the same timeframe that already existed
+// to the left of the base sets the flag. Zones born during the move itself do not count.
+method update_os(array<Zone> zones, bool is_supply, int slot) =>
+    if zones.size() > 0 and brk_t.size() > 0
+        int key = slot * 2 + (is_supply ? 1 : 0)
+        int slack = timeframe.in_seconds() * 1000
+        for i = 0 to zones.size() - 1
+            Zone z = zones.get(i)
+            if not z.os and z.touches == 0
+                for j = 0 to brk_t.size() - 1
+                    int bt = brk_t.get(j)
+                    if bt < z.lt - slack
+                        break
+                    if brk_k.get(j) == key and brk_lt.get(j) < z.lt
+                        z.os := true
+                        break
+
+// Records a higher timeframe turn that had no clean base.
+note_turn(int slot, bool is_supply, bool tn, int t0, int t1, float ext) =>
+    if slot > 0 and slot < 3 and tn and not na(t0) and not na(t1)
+        int key = t0 * 8 + slot * 2 + (is_supply ? 0 : 1)
+        if turn_seen.indexof(key) < 0
+            turn_seen.unshift(key)
+            if turn_seen.size() > 200
+                turn_seen.pop()
+            pt_key.unshift(slot * 2 + (is_supply ? 0 : 1))
+            pt_t0.unshift(t0)
+            pt_t1.unshift(t1)
+            pt_ext.unshift(ext)
+
+// Drops one timeframe to read the base: a zone of the timeframe below whose base sits inside the turn window
+// and at the turn's extreme is drawn back as a zone of this timeframe. Pending turns expire after 12 of their candles.
+resolve_turns(int slot, bool is_supply, array<Zone> zones, float yard_h, float tf_close) =>
+    if slot > 0 and slot < 3 and pt_key.size() > 0
+        int key = slot * 2 + (is_supply ? 0 : 1)
+        array<Zone> lower = slot == 2 ? (is_supply ? sup_w : dem_w) : (is_supply ? sup_d : dem_d)
+        int life = timeframe.in_seconds(slot == 2 ? TF2 : TF1) * 1000 * 12
+        for i = pt_key.size() - 1 to 0
+            if pt_key.get(i) == key
+                int t0 = pt_t0.get(i)
+                int t1 = pt_t1.get(i)
+                float ext = pt_ext.get(i)
+                bool done = false
+                if lower.size() > 0
+                    for j = 0 to lower.size() - 1
+                        Zone lz = lower.get(j)
+                        box lb = lz.b
+                        bool in_window = lz.lt >= t0 and lz.lt <= t1
+                        bool at_extreme = is_supply ? lb.get_top() >= ext - yard_h : lb.get_bottom() <= ext + yard_h
+                        // a candle of this timeframe that already closed through the base kills it before it is drawn
+                        bool dead = false
+                        float far = na
+                        if in_window and at_extreme
+                            for q = 1 to math.min(499, math.max(120, int(life / (chart_sec * 1000))))
+                                if time_close[q] <= lz.lt
+                                    break
+                                far := is_supply ? (na(far) ? tf_close[q] : math.max(far, tf_close[q])) : (na(far) ? tf_close[q] : math.min(far, tf_close[q]))
+                                if is_supply ? tf_close[q] > lb.get_top() : tf_close[q] < lb.get_bottom()
+                                    dead := true
+                                    break
+                        // an unclear base drawn from this timeframe (same first candle) is refined in place
+                        Zone own = na
+                        if in_window and at_extreme and not dead and zones.size() > 0
+                            for q = 0 to zones.size() - 1
+                                if zones.get(q).lt == t0
+                                    own := zones.get(q)
+                                    break
+                        if not na(own)
+                            own.b.set_top(lb.get_top())
+                            own.b.set_bottom(lb.get_bottom())
+                            own.via_lower := true
+                            own.chk := far
+                            // retests were counted against the wider box: count them again against the refined one
+                            own.touches := 0
+                            own.depth := 0.0
+                            own.d_prev := 0.0
+                            own.inside := false
+                            own.e_t := na
+                            own.zc_t := na
+                            own.zc_px := na
+                            own.x_t := na
+                            own.x_px := na
+                            own.retired := false
+                            own.fresh := true
+                            done := true
+                            break
+                        if in_window and at_extreme and not dead
+                            int before = zones.size()
+                            create_zone(zones, is_supply, lb.get_top(), lb.get_bottom(), lz.lt, slot, yard_h, lz.base_n, t1, lz.gap, lz.gap_out, true, na)
+                            if zones.size() > before
+                                Zone pz = zones.get(0)
+                                pz.via_lower := true
+                                pz.chk := far
+                            done := true
+                            break
+                if done or time > t1 + life
+                    pt_key.remove(i)
+                    pt_t0.remove(i)
+                    pt_t1.remove(i)
+                    pt_ext.remove(i)
+
+process_slot(int slot, int mode, bool show, array<Zone> sup, array<Zone> dem, bool h_sf, float h_st, float h_sb, int h_stm, int h_sn, int h_si, bool h_df, float h_dt, float h_db, int h_dtm, int h_dn, int h_di, float h_c, float h_h, float h_l, float h_a, array<bool> l_sf, array<float> l_st, array<float> l_sb, array<int> l_stm, array<int> l_sn, array<int> l_si, array<bool> l_df, array<float> l_dt, array<float> l_db, array<int> l_dtm, array<int> l_dn, array<int> l_di, array<float> l_c, array<float> l_h, array<float> l_l, array<float> l_a, bool h_stn, int h_st0, int h_st1, float h_stx, bool h_dtn, int h_dt0, int h_dt1, float h_dtx, bool h_sg, bool h_dg, array<bool> l_sg, array<bool> l_dg, bool h_so, bool h_do, array<bool> l_so, array<bool> l_do, float h_sm, float h_dm, array<float> l_sm, array<float> l_dm, bool tf_new) =>
+    float pc = h_c[1]
+    float yd = mode == 2 ? (l_a.size() > 0 ? l_a.get(l_a.size() - 1) : na) : h_a
+    if not na(yd)
+        slot_yard.set(slot, yd)
+    float ph = h_h[1]
+    float pl = h_l[1]
+    if show
+        if mode == 2
+            if l_c.size() > 0
+                for i = 0 to l_c.size() - 1
+                    add_once(sup, true, slot, l_sf.get(i), l_st.get(i), l_sb.get(i), l_stm.get(i), l_sn.get(i), l_si.get(i), l_a.get(i), l_sg.get(i), l_so.get(i), l_sm.get(i))
+                    add_once(dem, false, slot, l_df.get(i), l_dt.get(i), l_db.get(i), l_dtm.get(i), l_dn.get(i), l_di.get(i), l_a.get(i), l_dg.get(i), l_do.get(i), l_dm.get(i))
+                    monitor(sup, true, slot, l_c.get(i), l_h.get(i), l_l.get(i))
+                    monitor(dem, false, slot, l_c.get(i), l_h.get(i), l_l.get(i))
+                sup.update_os(true, slot)
+                dem.update_os(false, slot)
+            0
+        else
+            add_once(sup, true, slot, h_sf, h_st, h_sb, h_stm, h_sn, h_si, h_a, h_sg, h_so, h_sm)
+            add_once(dem, false, slot, h_df, h_dt, h_db, h_dtm, h_dn, h_di, h_a, h_dg, h_do, h_dm)
+            catch_up(sup, true, slot, h_c, h_h, h_l, mode == 1, tf_new)
+            catch_up(dem, false, slot, h_c, h_h, h_l, mode == 1, tf_new)
+            // A higher timeframe zone is judged once per finished candle of its timeframe, on the chart bar a new one
+            // starts. Live, the candle is still forming and its close would kill a zone history keeps; on history
+            // every chart bar inside the period repeats the last finished candle, so judging each bar counted a wick
+            // that touched and closed outside as a new retest on every chart bar
+            if mode == 0
+                monitor(sup, true, slot, h_c, h_h, h_l)
+                monitor(dem, false, slot, h_c, h_h, h_l)
+            else if tf_new
+                monitor(sup, true, slot, pc, ph, pl)
+                monitor(dem, false, slot, pc, ph, pl)
+            sup.update_os(true, slot)
+            dem.update_os(false, slot)
+            note_turn(slot, true, h_stn, h_st0, h_st1, h_stx)
+            note_turn(slot, false, h_dtn, h_dt0, h_dt1, h_dtx)
+            resolve_turns(slot, true, sup, h_a, h_c)
+            resolve_turns(slot, false, dem, h_a, h_c)
+            0
+
+// Sizes every box: either anchored at its base candle and extended to the right margin, or a fixed
+// width per timeframe measured back from the last candle (Daily shortest, Monthly longest).
+method size_all(array<Zone> zones, int slot, int right_time) =>
+    if zones.size() > 0
+        int left_bar = math.max(bar_index - zone_width(slot), 0)
+        for i = 0 to zones.size() - 1
+            box b = zones.get(i).b
+            if anchor_base
+                b.set_right(right_time)
+            else
+                b.set_xloc(left_bar, bar_index + 5, xloc.bar_index)
+
+method overlaps_any(array<box> boxes, float top, float btm) =>
+    bool hit = false
+    if boxes.size() > 0
+        for i = 0 to boxes.size() - 1
+            box b = boxes.get(i)
+            if top >= b.get_bottom() and btm <= b.get_top()
+                hit := true
+                break
+    hit
+
+// Hides every zone in the list. Used for timeframes below the chart timeframe.
+method hide_all(array<Zone> zones, bool is_supply, int slot) =>
+    color base = zone_color(slot, is_supply)
+    if zones.size() > 0
+        for i = 0 to zones.size() - 1
+            box b = zones.get(i).b
+            b.set_bgcolor(color.new(base, 100))
+            b.set_border_color(color.new(base, 100))
+            b.set_text("")
+
+// Marks every zone whose base formed mostly inside an older zone of the same side, on the same or a higher timeframe,
+// after that zone's impulse candle had closed: price was back in the older zone, so the base is its retest reaction (a
+// move from that zone), not a new zone. Judged on the last bar from fixed history (base and impulse times), so the order
+// zones were confirmed in does not matter. A drill-down copy read from this very base has its impulse after the base, so
+// it never marks the zone it came from
+flag_reactions(array<Zone> zs, bool is_supply, int slot) =>
+    if zs.size() > 0
+        for i = 0 to zs.size() - 1
+            Zone z = zs.get(i)
+            float h = z.b.get_top() - z.b.get_bottom()
+            bool hit = false
+            for s2 = slot to 2
+                array<Zone> hz = s2 == 0 ? (is_supply ? sup_d : dem_d) : s2 == 1 ? (is_supply ? sup_w : dem_w) : (is_supply ? sup_m : dem_m)
+                int tf_ms = timeframe.in_seconds(s2 == 0 ? TF0 : s2 == 1 ? TF1 : TF2) * 1000
+                if hz.size() > 0 and h > 0
+                    for q = 0 to hz.size() - 1
+                        Zone oz = hz.get(q)
+                        // on the entry timeframe a new base on an older zone of its own timeframe is the new zone (the
+                        // newest base is the one traded, see superseded); only a higher timeframe zone makes it a reaction
+                        if not (s2 == slot and (q == i or slot == 0))
+                            float ov = math.min(z.b.get_top(), oz.b.get_top()) - math.max(z.b.get_bottom(), oz.b.get_bottom())
+                            if not na(oz.it) and oz.lt < z.lt and oz.it + tf_ms <= z.lt and ov >= 0.5 * h
+                                hit := true
+                                break
+                if hit
+                    break
+            z.rr := hit
+
+// Entry timeframe only: true when a newer base of the same side formed on this zone (half of the newer zone inside it).
+// Price came back to the older zone and based again, so the newer zone is the one traded and drawn; the older one is
+// hidden and is never a target (one outline per area, the newest base wins)
+superseded(array<Zone> zs, int i) =>
+    bool hit = false
+    Zone z = zs.get(i)
+    if zs.size() > 1
+        for q = 0 to zs.size() - 1
+            Zone oz = zs.get(q)
+            float h = oz.b.get_top() - oz.b.get_bottom()
+            // a newer base that is itself a retest reaction of a higher timeframe zone, or past its touches, is not drawn
+            // as a zone, so it does not take the older zone's place
+            if q != i and oz.lt > z.lt and h > 0 and not oz.rr and not oz.retired
+                float ov = math.min(z.b.get_top(), oz.b.get_top()) - math.max(z.b.get_bottom(), oz.b.get_bottom())
+                if ov >= 0.5 * h
+                    hit := true
+                    break
+    hit
+
+// True when a drawn zone of a lower timeframe slot covers the same price range (each edge within a tenth of the height): the
+// higher timeframe zone was read from that base, so drawing both stacks two boxes on one level. The lower one is drawn
+// and its label shows the higher timeframe as backing
+dup_lower(int slot, bool is_supply, box b, bool need_full) =>
+    bool hit = false
+    float h = b.get_top() - b.get_bottom()
+    if slot > 0 and h > 0 and drawn_b.size() > 0
+        for i = 0 to drawn_b.size() - 1
+            int k = drawn_k.get(i)
+            if k % 2 == (is_supply ? 0 : 1) and int(k / 2) < slot and (drawn_full.get(i) or not need_full)
+                box lb = drawn_b.get(i)
+                if math.abs(lb.get_top() - b.get_top()) <= 0.1 * h and math.abs(lb.get_bottom() - b.get_bottom()) <= 0.1 * h
+                    hit := true
+                    break
+    hit
+
+// Draw the nearest show_n zones on this side in full, the rest faint (Show All Valid Zones). White outline on the closest one if asked.
+// With use_filter, a zone is eligible only if it overlaps one of the anchor boxes (the visible chart timeframe zones).
+// Returns the boxes that ended up visible.
+refresh(array<Zone> zones, bool is_supply, int slot, bool do_highlight, array<box> anchors, bool use_filter) =>
+    [w, tr, nm] = zone_style(slot)
+    color base = zone_color(slot, is_supply)
+    array<box> shown_boxes = array.new<box>()
+    int n = zones.size()
+    if n > 0
+        array<float> dist = array.new<float>(n, na)
+        array<bool> shown_flag = array.new<bool>(n, false)
+        for i = 0 to n - 1
+            box b = zones.get(i).b
+            float d = is_supply ? (b.get_bottom() > close ? b.get_bottom() - close : (b.get_top() >= close ? 0.0 : na)) : (b.get_top() < close ? close - b.get_top() : (b.get_bottom() <= close ? 0.0 : na))
+            if use_filter and not anchors.overlaps_any(b.get_top(), b.get_bottom())
+                d := na
+            // a retired zone is never one of the nearest (it is not tradable); it is drawn faint below
+            if zones.get(i).retired or zones.get(i).rr or ((slot == 0 or slot == 3) and superseded(zones, i))
+                d := na
+            // under 1 hour with One And Done, a zone that has had its touch and price has left is not tradable, so it is
+            // not a target either (a zone price is in right now stays, so a trade in progress keeps its label)
+            if one_done and timeframe.in_seconds(slot_tf(slot)) < 3600 and zones.get(i).touches >= 1 and not zones.get(i).inside
+                d := na
+            dist.set(i, d)
+            b.set_bgcolor(color.new(base, 100))
+            b.set_border_color(color.new(base, 100))
+            b.set_text("")
+        int shown = 0
+        while shown < show_n
+            int best = -1
+            float bd = na
+            for i = 0 to n - 1
+                float d = dist.get(i)
+                if not na(d) and (na(bd) or d < bd)
+                    bd := d
+                    best := i
+            if best < 0
+                break
+            Zone z = zones.get(best)
+            box b = z.b
+            [bk, tag] = backing(slot, is_supply, b)
+            bool is_target = shown == 0 and do_highlight
+            bool dup = not is_target and dup_lower(slot, is_supply, b, true)
+            b.set_bgcolor(color.new(base, dup ? 100 : is_target ? target_tr : tr))
+            b.set_border_style(line.style_solid)
+            string side_nm = nm + (is_supply ? " SUPPLY" : " DEMAND")
+            string info = side_nm + " " + str.tostring(b.get_bottom(), format.mintick) + " - " + str.tostring(b.get_top(), format.mintick) + " | base " + str.tostring(z.base_n) + " | " + str.format_time(z.lt, "yyyy-MM-dd") + (z.gap ? " | gap refined" : "") + (z.via_lower ? " | base read below" + (na(z.chk) ? "" : (is_supply ? " | highest close since base " : " | lowest close since base ") + str.tostring(z.chk, format.mintick)) : "")
+            b.set_text(show_zone_info ? info : (is_target or label_targets_only ? "" : side_nm))
+            if is_target
+                b.set_border_color(highlight_color)
+                b.set_border_width(3)
+                tgt_zones.push(z)
+                tgt_is_sup.push(is_supply)
+                tgt_tags.push(tag)
+                tgt_slots.push(slot)
+            else
+                b.set_border_color(dup ? color.new(base, 100) : base)
+                b.set_border_width(w)
+            if dup
+                b.set_text("")
+            else
+                drawn_b.push(b)
+                drawn_k.push(slot * 2 + (is_supply ? 0 : 1))
+                drawn_full.push(true)
+            dist.set(best, na)
+            shown_boxes.push(b)
+            shown_flag.set(best, true)
+            shown += 1
+        // every other zone that price has not closed through is drawn faint, so a supply or demand that price left long
+        // ago is on the chart when price comes back to it
+        // Kept to the ones price can reach soon (within faint_reach typical bodies of their own timeframe) and to the
+        // chart timeframe and above: an old Daily zone far below a Monthly chart is clutter, not a level in play
+        int md = slot == 0 ? mode_d : slot == 1 ? mode_w : slot == 2 ? mode_m : 0
+        float reach = faint_reach > 0 ? faint_reach * slot_yard.get(slot) : na
+        // older (dashed) zones only for the chart's own timeframe and the one above it: a Daily retest base on a 1H chart
+        // is checked on the 4H or Daily chart, not stacked here
+        bool faint_tf = slot == 3 or (chart_slot >= 0 and (slot == chart_slot or slot == chart_slot + 1))
+        if show_all and md != 2 and faint_tf
+            for i = 0 to n - 1
+                Zone z = zones.get(i)
+                box b = z.b
+                float gap = b.get_bottom() > close ? b.get_bottom() - close : b.get_top() < close ? close - b.get_top() : 0.0
+                // a zone that a newer base of its side formed on (price came back, based on it and left again) is the origin
+                // of that move: it stays on the chart twice as far from price as other faint zones, as long as it holds
+                bool origin = false
+                if n > 1
+                    for q = 0 to n - 1
+                        Zone oz = zones.get(q)
+                        if q != i and oz.lt > z.lt and oz.b.get_top() >= b.get_bottom() and oz.b.get_bottom() <= b.get_top()
+                            origin := true
+                            break
+                bool near = na(reach) or gap <= reach or (origin and gap <= 2 * reach)
+                // one outline per area on the Low timeframe (where chop stacks them): a dashed zone with a newer base of this
+                // timeframe on it is left to that newer zone. A Low timeframe zone inside a higher timeframe zone still shows:
+                // the entry timeframe's own edges are the ones traded. On the Mid and High timeframes every retest base still
+                // shows, since the newest base is the level watched there
+                bool covered = (slot == 0 or slot == 3) and superseded(zones, i)
+                if near and not covered and not shown_flag.get(i) and not (use_filter and not anchors.overlaps_any(b.get_top(), b.get_bottom())) and not dup_lower(slot, is_supply, b, false)
+                    // outline only, bright green for demand and red for supply, so old zones read apart from the drawn ones
+                    b.set_bgcolor(color.new(base, 100))
+                    b.set_border_color(is_supply ? color.new(#FF5252, 25) : color.new(#2ECC71, 25))
+                    b.set_border_width(1)
+                    b.set_border_style(line.style_dashed)
+                    drawn_b.push(b)
+                    drawn_k.push(slot * 2 + (is_supply ? 0 : 1))
+                    drawn_full.push(false)
+                    string nm2 = nm + (is_supply ? " SUPPLY" : " DEMAND")
+                    b.set_text(show_zone_info ? nm2 + " " + str.tostring(b.get_bottom(), format.mintick) + " - " + str.tostring(b.get_top(), format.mintick) + " | touches " + str.tostring(z.touches) + (z.retired ? " | no trade" : z.rr ? " | retest of a higher zone" : "") : "")
+    shown_boxes
+
+// The nearest zone of one side: the closest box above price for supply, below price for demand (a box that
+// contains price counts as distance zero). Used for the automatic range and for the Weekly fallback on a Monthly chart.
+nearest_zone_box(array<Zone> zones, bool is_supply) =>
+    box best = na
+    float bd = na
+    if zones.size() > 0
+        for i = 0 to zones.size() - 1
+            box b = zones.get(i).b
+            float d = is_supply ? (b.get_bottom() > close ? b.get_bottom() - close : (b.get_top() >= close ? 0.0 : na)) : (b.get_top() < close ? close - b.get_top() : (b.get_bottom() <= close ? 0.0 : na))
+            if not na(d) and (na(bd) or d < bd)
+                bd := d
+                best := b
+    best
+
+//-----------------------------------------------------------------------------
+// MAIN LOGIC
+//-----------------------------------------------------------------------------
+process_slot(0, mode_d, show_d, sup_d, dem_d, d_sf, d_st, d_sb, d_stm, d_sn, d_si, d_df, d_dt, d_db, d_dtm, d_dn, d_di, d_c, d_h, d_l, d_a, d_sf_a, d_st_a, d_sb_a, d_stm_a, d_sn_a, d_si_a, d_df_a, d_dt_a, d_db_a, d_dtm_a, d_dn_a, d_di_a, d_c_a, d_h_a, d_l_a, d_a_a, d_stn, d_st0, d_st1, d_stx, d_dtn, d_dt0, d_dt1, d_dtx, d_sg, d_dg, d_sg_a, d_dg_a, d_so, d_do, d_so_a, d_do_a, d_sm, d_dm, d_sm_a, d_dm_a, new_d)
+process_slot(1, mode_w, show_w, sup_w, dem_w, w_sf, w_st, w_sb, w_stm, w_sn, w_si, w_df, w_dt, w_db, w_dtm, w_dn, w_di, w_c, w_h, w_l, w_a, w_sf_a, w_st_a, w_sb_a, w_stm_a, w_sn_a, w_si_a, w_df_a, w_dt_a, w_db_a, w_dtm_a, w_dn_a, w_di_a, w_c_a, w_h_a, w_l_a, w_a_a, w_stn, w_st0, w_st1, w_stx, w_dtn, w_dt0, w_dt1, w_dtx, w_sg, w_dg, w_sg_a, w_dg_a, w_so, w_do, w_so_a, w_do_a, w_sm, w_dm, w_sm_a, w_dm_a, new_w)
+// the High timeframe has its own lower-tf arrays: on intraday styles it can sit below the chart (a 4H High on a Daily chart)
+process_slot(2, mode_m, show_m, sup_m, dem_m, m_sf, m_st, m_sb, m_stm, m_sn, m_si, m_df, m_dt, m_db, m_dtm, m_dn, m_di, m_c, m_h, m_l, m_a, m_sf_a, m_st_a, m_sb_a, m_stm_a, m_sn_a, m_si_a, m_df_a, m_dt_a, m_db_a, m_dtm_a, m_dn_a, m_di_a, m_c_a, m_h_a, m_l_a, m_a_a, m_stn, m_st0, m_st1, m_stx, m_dtn, m_dt0, m_dt1, m_dtx, m_sg, m_dg, m_sg_a, m_dg_a, m_so, m_do, m_so_a, m_do_a, m_sm, m_dm, m_sm_a, m_dm_a, new_m)
+process_slot(3, 0, show_c, sup_c, dem_c, c_sf, c_st, c_sb, c_stm, c_sn, c_si, c_df, c_dt, c_db, c_dtm, c_dn, c_di, c_c, c_h, c_l, c_a, d_sf_a, d_st_a, d_sb_a, d_stm_a, d_sn_a, d_si_a, d_df_a, d_dt_a, d_db_a, d_dtm_a, d_dn_a, d_di_a, d_c_a, d_h_a, d_l_a, d_a_a, c_stn, c_st0, c_st1, c_stx, c_dtn, c_dt0, c_dt1, c_dtx, c_sg, c_dg, d_sg_a, d_dg_a, c_so, c_do, d_so_a, d_do_a, c_sm, c_dm, d_sm_a, d_dm_a, true)
+
+//-----------------------------------------------------------------------------
+// MINOR ZONES (chart timeframe, warning only)
+// A swing high or low that price turned from sharply, where no full zone was drawn. The zone runs from the wick
+// extreme to the nearest body edge of the turning candle and its two neighbours (the wick zone), where price tends to
+// stall on the way back. Skipped where a full zone of either side already sits. Never a target, never scored.
+//-----------------------------------------------------------------------------
+var array<box> min_sup = array.new<box>()
+var array<box> min_dem = array.new<box>()
+int mz_len = 5
+float m_yard = ta.median(math.abs(close - open), typ_len)
+float m_ph = ta.pivothigh(high, mz_len, mz_len)
+float m_pl = ta.pivotlow(low, mz_len, mz_len)
+float m_lo = ta.lowest(low, mz_len)
+float m_hi = ta.highest(high, mz_len)
+
+minor_clash(array<Zone> zones, float top, float btm) =>
+    bool hit = false
+    if zones.size() > 0
+        for z in zones
+            if top >= z.b.get_bottom() and btm <= z.b.get_top()
+                hit := true
+                break
+    hit
+
+minor_add(array<box> arr, bool is_supply, float top, float btm, int t) =>
+    bool hit = minor_clash(sup_d, top, btm) or minor_clash(dem_d, top, btm)
+    if arr.size() > 0 and not hit
+        for b in arr
+            if top >= b.get_bottom() and btm <= b.get_top()
+                hit := true
+                break
+    if not hit
+        color col = is_supply ? sup_d_col : dem_d_col
+        arr.unshift(box.new(t, top, time, btm, xloc=xloc.bar_time, border_color=color.new(col, 15), border_width=1, border_style=line.style_dotted, bgcolor=color.new(col, 92)))
+        if arr.size() > 6
+            arr.pop().delete()
+
+// a candle closing through the far edge ends a minor zone, like a full one. A full zone that forms later on the
+// same price replaces it
+minor_update(array<box> arr, bool is_supply) =>
+    if arr.size() > 0
+        for i = arr.size() - 1 to 0
+            box b = arr.get(i)
+            if (is_supply ? close > b.get_top() : close < b.get_bottom()) or minor_clash(sup_d, b.get_top(), b.get_bottom()) or minor_clash(dem_d, b.get_top(), b.get_bottom())
+                b.delete()
+                arr.remove(i)
+
+if show_minor and barstate.isconfirmed and not na(m_yard) and m_yard > 0
+    minor_update(min_sup, true)
+    minor_update(min_dem, false)
+    int p = mz_len
+    // the turn must have pushed price away at least three typical bodies by the time the swing is confirmed
+    if not na(m_ph) and m_ph - m_lo >= 3 * m_yard
+        float near = math.max(math.max(open[p - 1], close[p - 1]), math.max(open[p], close[p]), math.max(open[p + 1], close[p + 1]))
+        minor_add(min_sup, true, m_ph, math.min(near, m_ph - m_yard * 0.25), time[p])
+    if not na(m_pl) and m_hi - m_pl >= 3 * m_yard
+        float near = math.min(math.min(open[p - 1], close[p - 1]), math.min(open[p], close[p]), math.min(open[p + 1], close[p + 1]))
+        minor_add(min_dem, false, math.max(near, m_pl + m_yard * 0.25), m_pl, time[p])
+
+if barstate.islast
+    // size the boxes once, on the last bar, so no box is ever positioned off the start of the chart
+    int future_time = time + (5 * timeframe.in_seconds() * 1000)
+    sup_d.size_all(0, future_time)
+    // minor zones far from price are hidden like far faint zones (Faint Zones Within), so an old swing weeks away does
+    // not stretch the chart's scale
+    float m_reach = faint_reach > 0 ? faint_reach * m_yard : na
+    for b in min_sup
+        b.set_right(future_time)
+        bool m_near = na(m_reach) or b.get_bottom() - close <= m_reach
+        b.set_bgcolor(color.new(sup_d_col, m_near ? 92 : 100))
+        b.set_border_color(color.new(sup_d_col, m_near ? 15 : 100))
+    for b in min_dem
+        b.set_right(future_time)
+        bool m_near = na(m_reach) or close - b.get_top() <= m_reach
+        b.set_bgcolor(color.new(dem_d_col, m_near ? 92 : 100))
+        b.set_border_color(color.new(dem_d_col, m_near ? 15 : 100))
+    dem_d.size_all(0, future_time)
+    sup_w.size_all(1, future_time)
+    dem_w.size_all(1, future_time)
+    sup_m.size_all(2, future_time)
+    dem_m.size_all(2, future_time)
+    sup_c.size_all(3, future_time)
+    dem_c.size_all(3, future_time)
+    while tgt_labels.size() > 0
+        tgt_labels.pop().delete()
+    tgt_zones.clear()
+    tgt_is_sup.clear()
+    tgt_tags.clear()
+    tgt_slots.clear()
+    // TARGET always marks the nearest Daily zones, on every chart. The Daily zones are where the entry
+    // is taken and where trend is scored, so the Weekly and Monthly charts outline the same Daily boxes
+    // the Daily chart does. Only when Daily is switched off does the chart timeframe take over.
+    bool hl_d = highlight_nearest and show_d
+    int anchor_slot = show_d ? 0 : show_w ? 1 : show_m ? 2 : 0
+    bool hl_w = highlight_nearest and anchor_slot == 1
+    bool hl_m = highlight_nearest and anchor_slot == 2
+    array<box> a_s = array.new<box>()
+    array<box> a_d = array.new<box>()
+    drawn_b.clear()
+    drawn_k.clear()
+    drawn_full.clear()
+    flag_reactions(sup_d, true, 0)
+    flag_reactions(dem_d, false, 0)
+    flag_reactions(sup_w, true, 1)
+    flag_reactions(dem_w, false, 1)
+    flag_reactions(sup_m, true, 2)
+    flag_reactions(dem_m, false, 2)
+    if anchor_slot == 0
+        a_s := refresh(sup_d, true, 0, hl_d, a_s, false)
+        a_d := refresh(dem_d, false, 0, hl_d, a_d, false)
+    else if anchor_slot == 1
+        a_s := refresh(sup_w, true, 1, hl_w, a_s, false)
+        a_d := refresh(dem_w, false, 1, hl_w, a_d, false)
+    else
+        a_s := refresh(sup_m, true, 2, hl_m, a_s, false)
+        a_d := refresh(dem_m, false, 2, hl_m, a_d, false)
+    // Daily is always drawn (it is the anchor unless switched off). Weekly below a Monthly chart is never
+    // drawn. Every other non-anchor timeframe follows the correlation rule.
+    if anchor_slot != 0
+        refresh(sup_d, true, 0, hl_d, a_s, corr_only)
+        refresh(dem_d, false, 0, hl_d, a_d, corr_only)
+    if anchor_slot != 1
+        if mode_w == 2
+            // Weekly below a Monthly chart stays hidden, except on a side where the Monthly has no zone at all:
+            // there the nearest Weekly zones stand in, the same ones the automatic range borrows
+            if na(nearest_zone_box(sup_m, true))
+                refresh(sup_w, true, 1, false, a_s, corr_only)
+            else
+                sup_w.hide_all(true, 1)
+            if na(nearest_zone_box(dem_m, false))
+                refresh(dem_w, false, 1, false, a_d, corr_only)
+            else
+                dem_w.hide_all(false, 1)
+        else
+            refresh(sup_w, true, 1, hl_w, a_s, corr_only)
+            refresh(dem_w, false, 1, hl_w, a_d, corr_only)
+    if anchor_slot != 2
+        refresh(sup_m, true, 2, false, a_s, corr_only)
+        refresh(dem_m, false, 2, false, a_d, corr_only)
+    // Each chart shows its own timeframe and the one above it, nothing else: a 1H chart (Day Trading) shows 1H and 4H
+    // zones, a 4H chart 4H and Daily, a Daily chart Daily. The other style timeframes are checked on their own charts.
+    // Their targets were picked above, so the score labels and the trend table stay
+    if chart_slot == 0
+        sup_m.hide_all(true, 2)
+        dem_m.hide_all(false, 2)
+    else if chart_slot > 0
+        sup_d.hide_all(true, 0)
+        dem_d.hide_all(false, 0)
+        if chart_slot == 2
+            sup_w.hide_all(true, 1)
+            dem_w.hide_all(false, 1)
+        // redraw the shown timeframes without the hidden lower boxes, so none is left out as a copy of a hidden one
+        drawn_b.clear()
+        drawn_k.clear()
+        drawn_full.clear()
+        if chart_slot == 1
+            refresh(sup_w, true, 1, false, a_s, corr_only)
+            refresh(dem_w, false, 1, false, a_d, corr_only)
+        refresh(sup_m, true, 2, false, a_s, corr_only)
+        refresh(dem_m, false, 2, false, a_d, corr_only)
+    // A chart timeframe the style does not include shows only its own zones, for drilling down: the style's boxes are
+    // hidden there (their targets were still picked above, so the score labels and the trend table stay). Never a target
+    if show_c
+        sup_d.hide_all(true, 0)
+        dem_d.hide_all(false, 0)
+        sup_w.hide_all(true, 1)
+        dem_w.hide_all(false, 1)
+        sup_m.hide_all(true, 2)
+        dem_m.hide_all(false, 2)
+        drawn_b.clear()
+        drawn_k.clear()
+        drawn_full.clear()
+        refresh(sup_c, true, 3, false, a_s, false)
+        refresh(dem_c, false, 3, false, a_d, false)
+
+//-----------------------------------------------------------------------------
+// TREND STATE
+// The same alternating swings the zig zag draws, scored with the 3 segment rule on closes.
+// Returns [state, control point, last high, previous high, last low, previous low]; state 1 up, -1 down, 0 range.
+//-----------------------------------------------------------------------------
+trend_pack() =>
+    // Break of structure, the way the sheet scores it. A candle that closes below the last confirmed swing low
+    // starts a downtrend and the swing high before that break is the control point; each later lower high
+    // becomes the new control point; a close above the control point ends the downtrend and, being a close
+    // above the last swing high, starts the uptrend. Mirror for up. The sequence of swings matters: a higher
+    // high followed by a close through the higher low is the first leg down, not a range.
+    var bool up = false
+    var float sh1 = na
+    var float sh2 = na
+    var float sl1 = na
+    var float sl2 = na
+    var float last = na
+    var int state = 0
+    var float cp = na
+    var float lo_since = na   // lowest low since the last swing low was set
+    var float hi_since = na   // highest high since the last swing high was set
+    float ph = ta.pivothigh(high, zz_len, zz_right)
+    float pl = ta.pivotlow(low, zz_len, zz_right)
+    bool is_high = not na(ph)
+    bool is_low = not na(pl)
+    if na(last)
+        last := close
+    // alternating swing tracker: one high, then one low, then one high ...
+    if up and is_high
+        if ph > last
+            last := ph
+            sh1 := ph
+    else if up and is_low
+        up := false
+        last := pl
+        sl2 := sl1
+        sl1 := pl
+    else if not up and is_low
+        if pl < last
+            last := pl
+            sl1 := pl
+    else if not up and is_high
+        up := true
+        last := ph
+        sh2 := sh1
+        sh1 := ph
+    if sl1 != sl1[1]
+        lo_since := na
+    if sh1 != sh1[1]
+        hi_since := na
+    lo_since := na(lo_since) ? low : math.min(lo_since, low)
+    hi_since := na(hi_since) ? high : math.max(hi_since, high)
+    // a confirmed swing that extends the pullback side moves the control point: lower high in a downtrend, higher low in an uptrend
+    // (a trend that began before its first pullback swing existed takes the first confirmed swing as its control point)
+    if state == -1 and is_high and (na(cp) or ph < cp)
+        cp := ph
+    if state == 1 and is_low and (na(cp) or pl > cp)
+        cp := pl
+    // breaks are judged on the close. Resistance to beat: the control point in a downtrend, else the last swing high. Mirror for support.
+    float res = state == -1 and not na(cp) ? cp : sh1
+    float sup = state == 1 and not na(cp) ? cp : sl1
+    if state != 1 and not na(res) and close > res
+        state := 1
+        cp := sl1
+    else if state != -1 and not na(sup) and close < sup
+        state := -1
+        cp := sh1
+    // Consolidation: the trend has not ended (no close through the control point) but it has stopped pushing.
+    // A downtrend that failed to make a lower low (last swing low above the one before, and nothing traded below it
+    // since) is moving sideways. Mirror for up. Scored like no trend
+    bool new_lo = not na(sl1) and lo_since < sl1
+    bool new_hi = not na(sh1) and hi_since > sh1
+    bool cons = state == -1 ? (not na(sl2) and sl1 >= sl2 and not new_lo) : state == 1 ? (not na(sh2) and sh1 <= sh2 and not new_hi) : false
+    [state, cp, sh1, sh2, sl1, sl2, cons]
+
+// The High timeframe fib range: the last swing high and the last swing low of the same alternating swings, each
+// pushed out when price trades beyond it. Returns [high, low, high time, low time]
+fib_pack() =>
+    var bool up = false
+    var float last = na
+    var float hi = na
+    var float lo = na
+    var int hi_t = na
+    var int lo_t = na
+    float ph = ta.pivothigh(high, zz_len, zz_right)
+    float pl = ta.pivotlow(low, zz_len, zz_right)
+    if na(last)
+        last := close
+    if up and not na(ph)
+        if ph > last
+            last := ph
+            hi := ph
+            hi_t := time[zz_right]
+    else if up and not na(pl)
+        up := false
+        last := pl
+        lo := pl
+        lo_t := time[zz_right]
+    else if not up and not na(pl)
+        if pl < last
+            last := pl
+            lo := pl
+            lo_t := time[zz_right]
+    else if not up and not na(ph)
+        up := true
+        last := ph
+        hi := ph
+        hi_t := time[zz_right]
+    if not na(hi) and high > hi
+        hi := high
+        hi_t := time
+    if not na(lo) and low < lo
+        lo := low
+        lo_t := time
+    [hi, lo, hi_t, lo_t]
+
+trend_line(string nm, int st, float cp, float sh1, float sh2, float sl1, float sl2, bool cons) =>
+    string st_s = cons ? "CONSOLIDATION (" + (st == 1 ? "up" : "down") + "trend stalled, no new " + (st == 1 ? "high" : "low") + ")" : st == 1 ? "UP" : st == -1 ? "DOWN" : "RANGE (no break of structure yet)"
+    string cp_s = st == 1 ? " | control point " + str.tostring(cp, format.mintick) + " (a close below ends it)" : st == -1 ? " | control point " + str.tostring(cp, format.mintick) + " (a close above ends it)" : ""
+    string piv = (na(sh2) or na(sl2)) ? "" : " | highs " + str.tostring(sh1, format.mintick) + (sh1 > sh2 ? " > " : " < ") + str.tostring(sh2, format.mintick) + " | lows " + str.tostring(sl1, format.mintick) + (sl1 > sl2 ? " > " : " < ") + str.tostring(sl2, format.mintick)
+    nm + " TREND: " + st_s + cp_s + piv
+
+// lookahead on: the readout and the trend score must match what the Mid timeframe chart itself shows, including a
+// swing confirmed by the current week. Without it, a Daily chart sees last week's closed state, so a fresh higher low
+// (AMD 402.10) is missing and the control point lags. Only the last bar's value is used for scoring
+[t_st, t_cp, t_sh1, t_sh2, t_sl1, t_sl2, t_cons] = request.security(syminfo.tickerid, trend_tf, trend_pack(), lookahead=timeframe.in_seconds(trend_tf) > chart_sec ? barmerge.lookahead_on : barmerge.lookahead_off)
+// the Low timeframe trend (Daily for the Longer Swing style), shown on the label when it pulls against the Mid trend
+[l_st, l_cp, l_sh1, l_sh2, l_sl1, l_sl2, l_cons] = request.security(syminfo.tickerid, TF0, trend_pack(), lookahead=timeframe.in_seconds(TF0) > chart_sec ? barmerge.lookahead_on : barmerge.lookahead_off)
+// the High timeframe trend, shown above the others for the bigger picture (not scored)
+[ht_st, ht_cp, ht_sh1, ht_sh2, ht_sl1, ht_sl2, ht_cons] = request.security(syminfo.tickerid, TF2, trend_pack(), lookahead=timeframe.in_seconds(TF2) > chart_sec ? barmerge.lookahead_on : barmerge.lookahead_off)
+// the chart's own timeframe trend, shown when the chart is not one of the style's timeframes (not scored)
+[c_tst, c_tcp, c_tsh1, c_tsh2, c_tsl1, c_tsl2, c_tcons] = request.security(syminfo.tickerid, timeframe.period, trend_pack())
+// the High timeframe fib range, scored by the Range check
+[fib_hi, fib_lo, fib_hi_t, fib_lo_t] = request.security(syminfo.tickerid, TF2, fib_pack(), lookahead=timeframe.in_seconds(TF2) > chart_sec ? barmerge.lookahead_on : barmerge.lookahead_off)
+
+//-----------------------------------------------------------------------------
+// EMA CONFLUENCE
+// Jay's rule: a full candle (wicks included) that closes above all three EMAs is a buy signal, a full candle below
+// all three is a sell signal. The last signal stands until the opposite one prints. A target zone gets EMA
+// confluence when the standing signal points its way (buy for demand, sell for supply). Not part of the 20 point score.
+//-----------------------------------------------------------------------------
+// Worked out on the Low timeframe (the entry timeframe), whatever the chart timeframe is.
+// Returns [fast, mid, slow, signal, Low timeframe candles since the signal], off candles back
+ema_pack(int off) =>
+    float ef = ta.ema(close, ema_fast_len)
+    float es = ta.ema(close, ema_slow_len)
+    float el = ta.ema(close, ema_long_len)
+    bool up = ema_full_fast ? low > ef : ema_fast_rule ? close > ef : low > math.max(ef, es, el)
+    bool dn = ema_full_fast ? high < ef : ema_fast_rule ? close < ef : high < math.min(ef, es, el)
+    var int sig = 0
+    var int since = 0
+    since += 1
+    // judged on closed candles only, so a live candle cannot flash a signal and take it back
+    if barstate.isconfirmed and up and not up[1] and sig != 1
+        sig := 1
+        since := 0
+    if barstate.isconfirmed and dn and not dn[1] and sig != -1
+        sig := -1
+        since := 0
+    int xside = close > ef ? 1 : close < ef ? -1 : 0   // which side of the fast EMA this candle closed on (the 9 EMA exit)
+    [ef[off], es[off], el[off], sig[off], since[off], xside[off], time_close[off]]
+
+// a Low timeframe above the chart reads its last closed candle (no repainting); at or below the chart it reads live
+bool ema_hi_tf = timeframe.in_seconds(TF0) > chart_sec
+[ema_f1, ema_s1, ema_l1, ema_sig1, ema_since1, ema_x1, ema_xt1] = request.security(syminfo.tickerid, TF0, ema_pack(1), lookahead=barmerge.lookahead_on)
+[ema_f0, ema_s0, ema_l0, ema_sig0, ema_since0, ema_x0, ema_xt0] = request.security(syminfo.tickerid, TF0, ema_pack(0), lookahead=barmerge.lookahead_off)
+float ema_f = ema_hi_tf ? ema_f1 : ema_f0
+float ema_s = ema_hi_tf ? ema_s1 : ema_s0
+float ema_l = ema_hi_tf ? ema_l1 : ema_l0
+int ema_sig = nz(ema_hi_tf ? ema_sig1 : ema_sig0)
+int ema_since = nz(ema_hi_tf ? ema_since1 : ema_since0)
+int ema_x = nz(ema_hi_tf ? ema_x1 : ema_x0)
+int ema_xt = ema_hi_tf ? ema_xt1 : ema_xt0
+bool ema_buy = ema_sig == 1 and nz(ema_sig[1]) != 1
+bool ema_sell = ema_sig == -1 and nz(ema_sig[1]) != -1
+
+// the lines on the chart follow the chart's own candles on every timeframe; the signal above stays on the Low timeframe
+float ema_f_c = ta.ema(close, ema_fast_len)
+float ema_s_c = ta.ema(close, ema_slow_len)
+float ema_l_c = ta.ema(close, ema_long_len)
+plot(show_ema ? ema_f_c : na, 'Fast EMA', color=ema_fast_col, linewidth=1)
+plot(show_ema ? ema_s_c : na, 'Mid EMA', color=ema_slow_col, linewidth=1)
+plot(show_ema ? ema_l_c : na, 'Slow EMA', color=ema_long_col, linewidth=2)
+plotshape(show_ema_sig and ema_buy, 'EMA Buy', shape.triangleup, location.belowbar, color.new(#2ECC71, 0), size=size.tiny)
+plotshape(show_ema_sig and ema_sell, 'EMA Sell', shape.triangledown, location.abovebar, color.new(#FF6B6B, 0), size=size.tiny)
+alertcondition(ema_buy, 'EMA buy candle', '{{ticker}}: EMA signal flipped to BUY')
+alertcondition(ema_sell, 'EMA sell candle', '{{ticker}}: EMA signal flipped to SELL')
+
+ema_sig_s() =>
+    string lens = str.tostring(ema_fast_len) + "/" + str.tostring(ema_slow_len) + "/" + str.tostring(ema_long_len)
+    string how = ema_full_fast ? "full candle " + (ema_sig == 1 ? "above " : "below ") + str.tostring(ema_fast_len) + " EMA" : ema_fast_rule ? "close " + (ema_sig == 1 ? "above " : "below ") + str.tostring(ema_fast_len) + " EMA" : "full candle " + (ema_sig == 1 ? "above " : "below ") + lens
+    ema_sig == 0 ? "no signal yet" : (ema_sig == 1 ? "BUY" : "SELL") + " (" + how + ", " + str.tostring(ema_since) + " " + tf_name(TF0) + " bars ago)"
+
+// returns 1 when the standing signal points the zone's way, -1 when it points against it, 0 with no signal, and the label line
+ema_conf(Zone z, bool is_supply) =>
+    int n = ema_sig == 0 ? 0 : ema_sig == (is_supply ? -1 : 1) ? 1 : -1
+    string txt = "EMA " + (n == 1 ? "CONFLUENCE" : n == -1 ? "AGAINST" : "NONE") + " | " + ema_sig_s()
+    [n, txt]
+
+// ENTRY TYPES (TradePhantoms course). The purity of a visit decides how it is traded:
+//   1 TOUCH: purity 4, the first retrace of a fresh zone. Limit order at the near edge.
+//   2 ZONE:  purity 2 (retouched once, under 50% deep) and a trend trade. Enter inside the zone after a candle closes in it.
+//   3 EXIT:  purity 0, or a counter trend zone at purity 2. Let price go in and turn, enter on the close back out.
+// Backtest (entry_types_backtest.py, 9 EMA exit): on 1H and 4H zones Zone and Exit entries on retouched zones made money
+// on top of the fresh touches; on 5m zones the Exit entries lost, which One And Done already rules out.
+// A visit is live while price is in the zone, or on the zone timeframe candle right after the one that closed back out.
+visit_live(Zone z) =>
+    int ms = timeframe.in_seconds(slot_tf(z.slot)) * 1000
+    z.inside or (not na(z.x_t) and time - z.x_t <= ms)
+
+// Purity the sheet's way, counting only the visits before the one being traded: the latest visit when latest is true,
+// otherwise the next one.
+purity_of(Zone z, bool latest) =>
+    int before = latest ? math.max(z.touches - 1, 0) : z.touches
+    float dp = latest ? z.d_prev : z.depth
+    before == 0 ? 4 : before == 1 and dp < 0.5 ? 2 : 0
+
+entry_type(int pur, int s_trend) =>
+    pur == 4 ? 1 : pur == 2 and s_trend == 4 ? 2 : 3
+
+// One And Done: a zone under 1 hour that has had its touch takes no second entry (0 = none)
+used_up(Zone z) =>
+    one_done and timeframe.in_seconds(slot_tf(z.slot)) < 3600 and z.touches >= 1 and not z.inside
+
+entry_name(int et) =>
+    et == 1 ? "TOUCH ENTRY" : et == 2 ? "ZONE ENTRY" : "EXIT ENTRY"
+
+// The HOW line: the steps for the entry this zone calls for
+entry_hint(Zone z, bool is_supply, int et, int pur, int s_trend) =>
+    float near = is_supply ? z.b.get_bottom() : z.b.get_top()
+    float far = is_supply ? z.b.get_top() : z.b.get_bottom()
+    string side = is_supply ? "sell" : "buy"
+    string tf = tf_name(slot_tf(z.slot))
+    string stop = "stop just past " + str.tostring(far, format.mintick)
+    et == 0 ? "HOW: no trade here. Zones under 1 hour are one and done and this one has had its touch; it is removed when price comes back." :
+     et == 1 ? "HOW (touch entry, fresh zone, purity 4): set a " + side + " limit at " + str.tostring(near, format.mintick) + ", " + stop + ". It fills the moment price comes back. Only take it on a zone that scores well." :
+     et == 2 ? "HOW (zone entry, touched once under half way, with the trend): no limit order. Wait for a " + tf + " candle to close inside the zone, then " + side + " inside it (limit or market), " + stop + ". No close inside, no trade." :
+     "HOW (exit entry, purity " + str.tostring(pur) + (s_trend == 0 ? ", counter trend" : "") + "): do not " + side + " the touch. Let price go into the zone and turn, then " + side + " when a " + tf + " candle closes back " + (is_supply ? "below " : "above ") + str.tostring(near, format.mintick) + ", " + stop + "."
+
+// 9 EMA exit (Best Loser Wins: let the winner run). Replays the chart candles since the zone's first retest:
+// entry at the near edge, stop at the far edge. On the entry candle only its close counts in our favour, because its
+// extreme most likely printed before price reached the zone. Once a candle reaches +1R the stop moves to breakeven
+// from the next candle on; after that the trade ends on the first Low timeframe candle that closes back across the
+// fast EMA and closed after the +1R candle. Only trades the standing EMA signal agreed with when Require EMA
+// Agreement is on and the Low timeframe is under 1 hour. Returns [state, label line, bars back to the entry, bars back to the +1R candle, bars back to the
+// end, R at the end]. state: 0 no trade, 1 open, 2 stop at breakeven, 3 9 EMA exit, 4 stopped, 5 breakeven stop.
+trade_walk(Zone z, bool is_supply, int et) =>
+    int state = 0
+    string txt = ""
+    int n = -1
+    int k1 = -1
+    int ke = -1
+    float r_end = na
+    float top = z.b.get_top()
+    float btm = z.b.get_bottom()
+    float far = is_supply ? top : btm
+    int d = is_supply ? -1 : 1
+    // entry: Touch at the near edge on the first retest, Zone at the close of the first candle inside, Exit at the
+    // close of the candle back out. The latter two enter at a close, so their walk starts on the candle after
+    int t0 = et == 1 ? z.e_t : et == 2 ? z.zc_t : z.x_t
+    float near = et == 1 ? (is_supply ? btm : top) : et == 2 ? z.zc_px : z.x_px
+    float risk = na(near) ? na : (near - far) * d
+    if show_exit and not na(t0) and risk > 0
+        for k = 0 to 498
+            if time[k] < t0
+                break
+            n := k
+        if n >= 0 and time[n + 1] < t0 and (not ema_need or ema_sig[n] == d)
+            state := 1
+            int t1r = na
+            for k = (et == 1 ? n : n - 1) to 0
+                if k < 0
+                    break
+                float fav = et == 1 and n == k ? math.max((close[k] - near) * d, 0.0) / risk : (d == 1 ? high[k] - near : near - low[k]) / risk
+                float adv = (d == 1 ? low[k] - near : near - high[k]) / risk
+                if state == 1 and adv <= -1
+                    state := 4
+                    ke := k
+                    r_end := -1.0
+                    break
+                if state == 2 and adv <= 0
+                    state := 5
+                    ke := k
+                    r_end := 0.0
+                    break
+                if state == 2 and (k > 0 or barstate.isconfirmed) and ema_x[k] == -d and ema_xt[k] > t1r
+                    state := 3
+                    ke := k
+                    r_end := (close[k] - near) * d / risk
+                    break
+                if state == 1 and fav >= 1
+                    state := 2
+                    k1 := k
+                    t1r := time_close[k]
+            string ema_nm = str.tostring(ema_fast_len) + " EMA"
+            string cross = tf_name(TF0) + " close " + (is_supply ? "above" : "below") + " the " + ema_nm
+            txt := state == 1 ? "TRADE (" + entry_name(et) + "): in at " + str.tostring(near, format.mintick) + ", stop " + str.tostring(far, format.mintick) + " | at +1R (" + str.tostring(near + d * risk, format.mintick) + ") stop to breakeven, then exit on a " + cross :
+                 state == 2 ? "TRADE: stop at breakeven " + str.tostring(near, format.mintick) + " | exit on the first " + cross :
+                 state == 3 ? "TRADE DONE: " + ema_nm + " exit at " + str.tostring(close[ke], format.mintick) + " (" + (r_end >= 0 ? "+" : "") + str.tostring(r_end, "#.#") + "R)" :
+                 state == 4 ? "TRADE DONE: stopped out (-1R)" : "TRADE DONE: breakeven stop (0R)"
+    [state, txt, n, k1, ke, r_end]
+
+// BE and EXIT markers on the chart, cleared with the target labels
+trade_marks(bool is_supply, int state, int k1, int ke, float r_end) =>
+    if state >= 2 and k1 >= 0
+        tgt_labels.push(label.new(bar_index - k1, is_supply ? low[k1] : high[k1], "BE", style=is_supply ? label.style_label_up : label.style_label_down, color=color.new(color.white, 100), textcolor=color.new(color.white, 0), size=size.small))
+    if state >= 3 and ke >= 0
+        string t = state == 3 ? "EXIT " + (r_end >= 0 ? "+" : "") + str.tostring(r_end, "#.#") + "R" : state == 4 ? "STOP -1R" : "BE 0R"
+        tgt_labels.push(label.new(bar_index - ke, is_supply ? high[ke] : low[ke], t, style=is_supply ? label.style_label_down : label.style_label_up, color=color.new(color.white, 100), textcolor=state == 3 and r_end > 0 ? color.new(#2ECC71, 0) : color.new(#FF6B6B, 0), size=size.small))
+
+var table trend_box = table.new(position.top_right, 1, 6, bgcolor=color.new(color.black, 25), border_width=1, border_color=color.new(color.white, 60))
+if barstate.islast and show_trend
+    if timeframe.in_seconds(TF2) != timeframe.in_seconds(trend_tf)
+        trend_box.cell(0, 0, trend_line(tf_name(TF2), ht_st, ht_cp, ht_sh1, ht_sh2, ht_sl1, ht_sl2, ht_cons), text_color=color.new(color.white, 15), text_size=size.small, text_halign=text.align_left)
+    else
+        trend_box.cell(0, 0, "", text_size=size.small)
+    trend_box.cell(0, 1, trend_line(tf_name(trend_tf), t_st, t_cp, t_sh1, t_sh2, t_sl1, t_sl2, t_cons), text_color=color.white, text_size=size.small, text_halign=text.align_left)
+    if timeframe.in_seconds(trend_tf) != timeframe.in_seconds(TF0)
+        trend_box.cell(0, 2, trend_line(tf_name(TF0), l_st, l_cp, l_sh1, l_sh2, l_sl1, l_sl2, l_cons), text_color=color.new(color.white, 30), text_size=size.small, text_halign=text.align_left)
+    else
+        trend_box.cell(0, 2, "", text_size=size.small)
+    // the Low timeframe far below the chart (Scalping on a Daily chart) means hundreds of candles per bar: slow and coarse
+    if show_c
+        trend_box.cell(0, 3, trend_line(tf_name(timeframe.period), c_tst, c_tcp, c_tsh1, c_tsh2, c_tsl1, c_tsl2, c_tcons), text_color=color.new(color.white, 30), text_size=size.small, text_halign=text.align_left)
+    else
+        trend_box.cell(0, 3, "", text_size=size.small)
+    trend_box.cell(0, 4, "EMA SIGNAL: " + ema_sig_s(), text_color=ema_sig == 1 ? color.new(#2ECC71, 10) : ema_sig == -1 ? color.new(#FF6B6B, 10) : color.new(color.white, 30), text_size=size.small, text_halign=text.align_left)
+    if timeframe.in_seconds(TF0) * 100 < chart_sec
+        trend_box.cell(0, 5, "Chart timeframe is far above the Low timeframe (" + tf_name(TF0) + "). Drop the chart to " + tf_name(TF1) + " or lower for reliable zones.", text_color=color.orange, text_size=size.small, text_halign=text.align_left)
+
+//-----------------------------------------------------------------------------
+// SETUP SCORE AND ALERTS
+// The indicator scores each target zone on the sheet's six checks, 20 points, with an automatic range
+// (100% at the near edge of the High timeframe supply at the swing high, 0% at the near edge of the demand at the swing low)
+// and an automatic risk to reward (entry at the zone's near edge, stop at its far edge, target at the other target zone).
+//-----------------------------------------------------------------------------
+// The zone a High timeframe swing turned from: the zone of that side nearest the swing extreme, a zone holding the
+// extreme counting as zero distance (a zone above a swing low was traded through, so it loses to the one the low
+// touched). It must lie within a quarter of the range from the extreme. na when none.
+swing_zone(array<Zone> zones, bool is_supply, float ext, float span) =>
+    box best = na
+    float bd = na
+    if zones.size() > 0 and not na(ext) and span > 0
+        for i = 0 to zones.size() - 1
+            box b = zones.get(i).b
+            float d = ext > b.get_top() ? ext - b.get_top() : ext < b.get_bottom() ? b.get_bottom() - ext : 0.0
+            if d <= span * 0.25 and (na(bd) or d < bd)
+                bd := d
+                best := b
+    best
+
+// The range: a fib on the High timeframe (the highest of the three, set by the trading style or the custom
+// timeframes) over its last swing high and swing low (see fib_pack), drawn zone to zone: 100% at the near (bottom)
+// edge of the High timeframe supply the swing high came out of, 0% at the near (top) edge of the High timeframe
+// demand the swing low came out of. An end with no such zone uses the swing price itself. Returns [top, bottom, top
+// name, bottom name, top time, bottom time]; the times anchor the drawing at the zone's base candle or the swing.
+range_levels() =>
+    float span = fib_hi - fib_lo
+    box s = swing_zone(sup_m, true, fib_hi, span)
+    box d = swing_zone(dem_m, false, fib_lo, span)
+    float hi = na(s) ? fib_hi : s.get_bottom()
+    float lo = na(d) ? fib_lo : d.get_top()
+    string hi_nm = tf_name(TF2) + (na(s) ? " swing high" : " supply")
+    string lo_nm = tf_name(TF2) + (na(d) ? " swing low" : " demand")
+    int hi_t = na(s) ? fib_hi_t : s.get_left()
+    int lo_t = na(d) ? fib_lo_t : d.get_left()
+    // two zones that overlap leave no range between their edges: then the swings decide
+    if not na(hi) and not na(lo) and hi <= lo
+        hi := fib_hi
+        lo := fib_lo
+        hi_nm := tf_name(TF2) + " swing high"
+        lo_nm := tf_name(TF2) + " swing low"
+        hi_t := fib_hi_t
+        lo_t := fib_lo_t
+    [hi, lo, hi_nm, lo_nm, hi_t, lo_t]
+
+// Returns [total, range, time, trend, move, os, purity, rrr, rrr_ratio, move_ratio, range_pos]
+score_zone(Zone z, bool is_supply, float r_top, float r_btm, box opp, string opp_nm) =>
+    box b = z.b
+    float top = b.get_top()
+    float btm = b.get_bottom()
+    float mid = (top + btm) / 2
+    float hgt = top - btm
+    int s_range = 0
+    float pos = na
+    if not na(r_top) and not na(r_btm) and r_top > r_btm
+        pos := (mid - r_btm) / (r_top - r_btm)
+        s_range := is_supply ? (pos >= 0.75 ? 2 : pos > 0.25 ? 1 : 0) : (pos <= 0.25 ? 2 : pos < 0.75 ? 1 : 0)
+    int s_time = z.base_n <= 3 ? 2 : z.base_n <= 6 ? 1 : 0
+    // trend on arrival: the Mid readout state, unless price must close through the control point to reach the zone
+    int s_trend = 2
+    if is_supply
+        s_trend := t_cons ? 2 : t_st == -1 ? ((na(t_cp) or btm < t_cp) ? 4 : 2) : t_st == 1 ? 0 : 2
+    else
+        s_trend := t_cons ? 2 : t_st == 1 ? ((na(t_cp) or top > t_cp) ? 4 : 2) : t_st == -1 ? 0 : 2
+    // Low and Mid timeframes pointing opposite ways is noted on the label but does not change the score: the Mid
+    // trend on arrival decides. A Daily pullback inside a Weekly uptrend is what brings price to a Daily demand
+    bool split = t_st != 0 and l_st != 0 and l_st != t_st
+    float ratio = na(z.ext) or hgt <= 0 ? na : (is_supply ? btm - z.ext : z.ext - top) / hgt
+    int s_move = not na(ratio) and ratio >= 2 ? 2 : 0
+    int s_os = z.os ? 2 : 0
+    // purity of the visit being traded: during a visit, the visits before it (a fresh zone being touched is still 4).
+    // Just after a candle closes back out, the visit stays the one being traded only when it calls for an Exit entry
+    int p_last = purity_of(z, true)
+    bool live = z.inside or (z.touches > 0 and not na(z.x_t) and visit_live(z) and entry_type(p_last, s_trend) == 3 and not used_up(z))
+    int s_pur = live ? p_last : purity_of(z, false)
+    float rrr = na
+    if not na(opp) and hgt > 0
+        float entry = is_supply ? btm : top
+        float target = is_supply ? opp.get_top() : opp.get_bottom()
+        float reward = is_supply ? entry - target : target - entry
+        if reward > 0
+            rrr := reward / hgt
+    int s_rrr = na(rrr) ? 0 : rrr >= 5 ? 4 : rrr >= 3 ? 2 : 0
+    int total = s_range + s_time + s_trend + s_move + s_os + s_pur + s_rrr
+    [total, s_range, s_time, s_trend, s_move, s_os, s_pur, s_rrr, rrr, ratio, pos, opp_nm, split]
+
+// Entry timing, by entry type (see ENTRY TYPES). A Touch entry is taken on the retest, or before any retest when the
+// impulse gapped away from the base. A Zone entry needs a candle of the zone's timeframe to have closed inside the zone
+// on this visit. An Exit entry is live on the candle after the one that closed back out. A go needs the score as well.
+// ema_n: 1 when the standing EMA signal points the zone's way (see ema_conf). With Require EMA Agreement on (Low TF under 1 hour),
+// a zone whose timing is right but whose EMA signal is not with it waits for the EMA
+entry_state(Zone z, int total, int ema_n, int slot, int et) =>
+    bool valid = total >= go_min
+    string tf = tf_name(slot_tf(slot))
+    // the gap-away entry is taken right after the gap: it is live for the first two candles of the zone's timeframe after
+    // the zone is confirmed. Later, with price long gone, the zone waits for its retest like any other
+    int gap_ms = timeframe.in_seconds(slot_tf(slot)) * 1000 * 2
+    bool gap_live = z.gap_out and z.touches == 0 and not na(z.ct) and time - z.ct <= gap_ms
+    bool timing = et == 0 ? false : et == 1 ? (z.inside or gap_live) : et == 2 ? (z.inside and not na(z.zc_t)) : (not z.inside and visit_live(z))
+    bool ema_ok = not ema_need or ema_n == 1
+    bool go = valid and timing and ema_ok
+    string why = et == 2 ? "zone entry, a " + tf + " candle closed inside" : et == 3 ? "exit entry, a " + tf + " candle closed back out" :
+         z.inside ? "touch entry, retest now" : "gap away, no retest needed"
+    string wait = et == 1 ? "WAIT FOR RETEST (touch entry)" : et == 2 ? (z.inside ? "WAIT FOR A " + tf + " CLOSE INSIDE (zone entry)" : "WAIT FOR PRICE (zone entry)") : (z.inside ? "WAIT FOR A " + tf + " CLOSE BACK OUT (exit entry)" : "WAIT FOR PRICE TO GO IN AND TURN (exit entry)")
+    string st = et == 0 ? "NO (one and done: this " + tf + " zone has had its touch)" : not valid ? "NO (score under " + str.tostring(go_min) + ")" : not timing ? wait : not ema_ok ? "WAIT FOR EMA (" + why + ", EMA not with the zone)" : "GO (" + why + ")"
+    [go, st]
+
+score_line(int total, int s_range, int s_time, int s_trend, int s_move, int s_os, int s_pur, int s_rrr, float rrr, float ratio, float pos, string opp_nm, float r_top, float r_btm, string r_top_nm, string r_btm_nm, bool split) =>
+    "SCORE " + str.tostring(total) + "/20 | range " + (na(pos) ? "? (no " + tf_name(TF2) + " swings yet)" : str.tostring(s_range) + (show_zone_info ? " (" + str.tostring(math.round(pos * 100)) + "% of " + str.tostring(r_btm, format.mintick) + " " + r_btm_nm + " to " + str.tostring(r_top, format.mintick) + " " + r_top_nm + ")" : "")) + " | time " + str.tostring(s_time) + " | trend " + str.tostring(s_trend) + (split ? " (" + tf_name(TF0) + " pulling against " + tf_name(TF1) + ")" : "") + " | move " + str.tostring(s_move) + (na(ratio) ? "" : " (" + str.tostring(ratio, "#.#") + "x)") + " | OS " + str.tostring(s_os) + " | purity " + str.tostring(s_pur) + " | rrr " + str.tostring(s_rrr) + (na(rrr) ? " (no opposing zone)" : " (" + str.tostring(rrr, "#.#") + ":1" + (opp_nm == "" ? "" : " to " + opp_nm) + ")")
+
+num(float x) =>
+    na(x) ? "null" : str.tostring(x, "#.####")
+
+setup_json(Zone z, bool is_supply, int slot, string tag, int total, int s_range, int s_time, int s_trend, int s_move, int s_os, int s_pur, int s_rrr, float rrr, float ratio, float pos, string opp_nm, bool go, string status, int ema_n) =>
+    box b = z.b
+    [w, tr, nm] = zone_style(slot)
+    '{"side":"' + (is_supply ? "SELL" : "BUY") + '","zone":"' + nm + (is_supply ? " SUPPLY " : " DEMAND ") + str.tostring(b.get_bottom(), format.mintick) + " - " + str.tostring(b.get_top(), format.mintick) + '","top":' + num(b.get_top()) + ',"btm":' + num(b.get_bottom()) + ',"backing":"' + str.trim(tag) + '","base":' + str.tostring(z.base_n) + ',"touches":' + str.tostring(z.touches) + ',"depth":' + num(z.depth) + ',"os":' + (z.os ? "true" : "false") + ',"gap":' + (z.gap ? "true" : "false") + ',"score":' + str.tostring(total) + ',"checks":{"range":' + str.tostring(s_range) + ',"time":' + str.tostring(s_time) + ',"trend":' + str.tostring(s_trend) + ',"move":' + str.tostring(s_move) + ',"os":' + str.tostring(s_os) + ',"purity":' + str.tostring(s_pur) + ',"rrr":' + str.tostring(s_rrr) + '},"rrr_ratio":' + num(rrr) + ',"rrr_target":"' + opp_nm + '","gap_out":' + (z.gap_out ? "true" : "false") + ',"go":' + (go ? "true" : "false") + ',"entry":"' + status + '"' + ',"move_ratio":' + num(ratio) + ',"range_pos":' + num(pos) + ',"ema":' + str.tostring(ema_n) + '}'
+
+// approach: how far price has travelled between the two target zones toward the one ahead
+var float prog_prev = na
+bool approach_now = false
+var int s_tr_prev = 0
+var int d_tr_prev = 0
+bool be_now = false
+bool exit_now = false
+if barstate.islast
+    Zone tgt_sup = na
+    Zone tgt_dem = na
+    string tgt_sup_tag = ""
+    string tgt_dem_tag = ""
+    int tgt_sup_slot = 0
+    int tgt_dem_slot = 0
+    if tgt_zones.size() > 0
+        for i = 0 to tgt_zones.size() - 1
+            if tgt_is_sup.get(i)
+                tgt_sup := tgt_zones.get(i)
+                tgt_sup_tag := tgt_tags.get(i)
+                tgt_sup_slot := tgt_slots.get(i)
+            else
+                tgt_dem := tgt_zones.get(i)
+                tgt_dem_tag := tgt_tags.get(i)
+                tgt_dem_slot := tgt_slots.get(i)
+    [r_top, r_btm, r_top_nm, r_btm_nm, r_top_t, r_btm_t] = range_levels()
+    string s_json = ""
+    string d_json = ""
+    // The profit target for risk to reward is the next opposing zone in the way: the other Low timeframe target when
+    // there is one, otherwise the nearest Mid timeframe zone on that side, otherwise the nearest High timeframe zone.
+    // The label says which timeframe the target came from when it is not the Low timeframe
+    if not na(tgt_sup)
+        box opp = na
+        string opp_nm = ""
+        if not na(tgt_dem)
+            opp := tgt_dem.b
+        else
+            opp := nearest_zone_box(dem_w, false)
+            opp_nm := tf_name(TF1) + " demand"
+            if na(opp)
+                opp := nearest_zone_box(dem_m, false)
+                opp_nm := tf_name(TF2) + " demand"
+            if na(opp)
+                opp_nm := ""
+        [tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, spl] = score_zone(tgt_sup, true, r_top, r_btm, opp, opp_nm)
+        [s_en, s_et] = ema_conf(tgt_sup, true)
+        int s_typ = used_up(tgt_sup) ? 0 : entry_type(a6, a3)
+        // the trade on the latest visit keeps the type that visit had
+        int s_typ_last = tgt_sup.touches == 0 ? 1 : entry_type(purity_of(tgt_sup, true), a3)
+        [s_go, s_ent] = entry_state(tgt_sup, tot, s_en, tgt_sup_slot, s_typ)
+        [s_tr, s_trt, s_n, s_k1, s_ke, s_re] = trade_walk(tgt_sup, true, s_typ_last)
+        string s_how = show_hint and (s_tr == 0 or s_tr >= 3) ? "\n" + entry_hint(tgt_sup, true, s_typ, a6, a3) : ""
+        trade_marks(true, s_tr, s_k1, s_ke, s_re)
+        be_now := be_now or (s_tr == 2 and s_tr_prev == 1)
+        exit_now := exit_now or (s_tr >= 3 and s_tr_prev >= 1 and s_tr_prev <= 2)
+        s_tr_prev := s_tr
+        mark_target(tgt_sup_slot, true, tgt_sup, tgt_sup_tag, (show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, r_top, r_btm, r_top_nm, r_btm_nm, spl) + "\n" : "") + s_et + (s_trt != "" ? "\n" + s_trt : "") + s_how, s_ent, s_go)
+        s_json := setup_json(tgt_sup, true, tgt_sup_slot, tgt_sup_tag, tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, s_go, s_ent, s_en)
+    if not na(tgt_dem)
+        box opp = na
+        string opp_nm = ""
+        if not na(tgt_sup)
+            opp := tgt_sup.b
+        else
+            opp := nearest_zone_box(sup_w, true)
+            opp_nm := tf_name(TF1) + " supply"
+            if na(opp)
+                opp := nearest_zone_box(sup_m, true)
+                opp_nm := tf_name(TF2) + " supply"
+            if na(opp)
+                opp_nm := ""
+        [tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, spl] = score_zone(tgt_dem, false, r_top, r_btm, opp, opp_nm)
+        [d_en, d_et] = ema_conf(tgt_dem, false)
+        int d_typ = used_up(tgt_dem) ? 0 : entry_type(a6, a3)
+        // the trade on the latest visit keeps the type that visit had
+        int d_typ_last = tgt_dem.touches == 0 ? 1 : entry_type(purity_of(tgt_dem, true), a3)
+        [d_go, d_ent] = entry_state(tgt_dem, tot, d_en, tgt_dem_slot, d_typ)
+        [d_tr, d_trt, d_n, d_k1, d_ke, d_re] = trade_walk(tgt_dem, false, d_typ_last)
+        string d_how = show_hint and (d_tr == 0 or d_tr >= 3) ? "\n" + entry_hint(tgt_dem, false, d_typ, a6, a3) : ""
+        trade_marks(false, d_tr, d_k1, d_ke, d_re)
+        be_now := be_now or (d_tr == 2 and d_tr_prev == 1)
+        exit_now := exit_now or (d_tr >= 3 and d_tr_prev >= 1 and d_tr_prev <= 2)
+        d_tr_prev := d_tr
+        mark_target(tgt_dem_slot, false, tgt_dem, tgt_dem_tag, (show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, r_top, r_btm, r_top_nm, r_btm_nm, spl) + "\n" : "") + d_et + (d_trt != "" ? "\n" + d_trt : "") + d_how, d_ent, d_go)
+        d_json := setup_json(tgt_dem, false, tgt_dem_slot, tgt_dem_tag, tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, d_go, d_ent, d_en)
+    if not na(tgt_sup) and not na(tgt_dem)
+        float s_edge = tgt_sup.b.get_bottom()
+        float d_edge = tgt_dem.b.get_top()
+        float span = s_edge - d_edge
+        if span > 0
+            float prog = math.max((close - d_edge) / span, (s_edge - close) / span)
+            if not na(prog_prev) and prog >= approach_pct and prog_prev < approach_pct and prog < 1
+                approach_now := true
+            prog_prev := prog
+    // fires on every bar close, with an empty setups list when there is no target, so the board can tell a silent alert from a chart with nothing to report
+    if alerts_on and barstate.isconfirmed
+        string trend_s = t_cons ? "CONSOLIDATION" : t_st == 1 ? "UP" : t_st == -1 ? "DOWN" : "RANGE"
+        string msg = '{"symbol":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","chart_tf":"' + timeframe.period + '","style":"' + (use_custom ? 'Custom' : str.split(style, ' (').get(0)) + '","low_tf":"' + tf_name(TF0) + '","mid_tf":"' + tf_name(TF1) + '","high_tf":"' + tf_name(TF2) + '","price":' + num(close) + ',"bar_time":' + str.tostring(time) + ',"trend":"' + trend_s + '","low_trend":"' + (l_st == 1 ? "UP" : l_st == -1 ? "DOWN" : "RANGE") + '","control_point":' + num(t_cp) + ',"range_top":' + num(r_top) + ',"range_btm":' + num(r_btm) + ',"alert_min":' + str.tostring(go_min) + ',"setups":[' + s_json + (s_json != "" and d_json != "" ? "," : "") + d_json + ']}'
+        alert(msg, alert.freq_once_per_bar_close)
+
+alertcondition(be_now, "Move stop to breakeven", "{{ticker}}: the target zone trade reached +1R, move the stop to breakeven")
+alertcondition(exit_now, "9 EMA exit", "{{ticker}}: the target zone trade is done (9 EMA exit or stop)")
+alertcondition(approach_now, "Price near a target zone", "{{ticker}}: price has covered most of the way to the next target zone")
+
+//-----------------------------------------------------------------------------
+// ZIG ZAG AND SWING LABELS (chart timeframe only)
+//-----------------------------------------------------------------------------
+float n_ph = ta.pivothigh(high, zz_len, zz_right)
+float n_pl = ta.pivotlow(low, zz_len, zz_right)
+
+if show_labels
+    if not na(n_ph)
+        label.new(bar_index[zz_right], n_ph, "High", style=label.style_label_down, color=color.new(color.white, 100), textcolor=label_color, size=size.tiny)
+    if not na(n_pl)
+        label.new(bar_index[zz_right], n_pl, "Low", style=label.style_label_up, color=color.new(color.white, 100), textcolor=label_color, size=size.tiny)
+
+var line zz_line = na
+var float last_zz_price = 0.0
+var bool dir_up = false
+
+if bar_index == 0
+    last_zz_price := close
+
+if show_zigzag
+    bool is_high = not na(n_ph)
+    bool is_low = not na(n_pl)
+
+    if dir_up and is_high
+        if n_ph > last_zz_price
+            last_zz_price := n_ph
+            if not na(zz_line)
+                zz_line.set_xy2(bar_index[zz_right], last_zz_price)
+
+    else if dir_up and is_low
+        dir_up := false
+        last_zz_price := n_pl
+        if not na(zz_line)
+            zz_line := line.new(zz_line.get_x2(), zz_line.get_y2(), bar_index[zz_right], last_zz_price, color=zigzag_color, width=2)
+
+    else if not dir_up and is_low
+        if n_pl < last_zz_price
+            last_zz_price := n_pl
+            if not na(zz_line)
+                zz_line.set_xy2(bar_index[zz_right], last_zz_price)
+
+    else if not dir_up and is_high
+        dir_up := true
+        last_zz_price := n_ph
+        if not na(zz_line)
+            zz_line := line.new(zz_line.get_x2(), zz_line.get_y2(), bar_index[zz_right], last_zz_price, color=zigzag_color, width=2)
+
+    if na(zz_line) and (is_high or is_low)
+        zz_line := line.new(bar_index, close, bar_index[zz_right], is_high ? n_ph : n_pl, color=zigzag_color, width=2)
+
+//-----------------------------------------------------------------------------
+// HIGH TIMEFRAME FIB RANGE (drawn on the last bar)
+//-----------------------------------------------------------------------------
+var array<line> fib_lines = array.new<line>()
+var array<label> fib_labels = array.new<label>()
+if barstate.islast
+    while fib_lines.size() > 0
+        fib_lines.pop().delete()
+    while fib_labels.size() > 0
+        fib_labels.pop().delete()
+    [rg_hi, rg_lo, rg_hi_nm, rg_lo_nm, rg_hi_t, rg_lo_t] = range_levels()
+    if show_fib and not na(rg_hi) and not na(rg_lo) and rg_hi > rg_lo
+        int t0 = math.min(rg_hi_t, rg_lo_t)
+        int t1 = time + 5 * timeframe.in_seconds() * 1000
+        for lv in array.from(0.0, 0.25, 0.5, 0.75, 1.0)
+            float p = rg_lo + lv * (rg_hi - rg_lo)
+            color col = lv == 1.0 ? color.new(#FF6B6B, 20) : lv == 0.0 ? color.new(#2ECC71, 20) : color.new(#F5C542, lv == 0.5 ? 30 : 55)
+            fib_lines.push(line.new(t0, p, t1, p, xloc=xloc.bar_time, color=col, style=lv == 0.5 ? line.style_dashed : line.style_dotted, width=1))
+            fib_labels.push(label.new(t0, p, tf_name(TF2) + " " + str.tostring(lv * 100, "#") + "%" + (lv == 1.0 ? " (" + rg_hi_nm + " " + str.tostring(rg_hi, format.mintick) + ")" : lv == 0.0 ? " (" + rg_lo_nm + " " + str.tostring(rg_lo, format.mintick) + ")" : ""), xloc=xloc.bar_time, style=label.style_label_lower_left, color=color.new(color.white, 100), textcolor=col, size=size.tiny))
+
+
+//-----------------------------------------------------------------------------
+// LAB EXPORT (jay_sd_lab.pine only, built by make_lab.py)
+//-----------------------------------------------------------------------------
+// nearest opposing zone ahead of the edge, the indicator's order: entry timeframe (not a reaction, retired or
+// superseded), else Mid, else High
+lab_opp(bool is_supply, float edge) =>
+    float best = na
+    for s2 = 0 to 2
+        array<Zone> oa = s2 == 0 ? (is_supply ? dem_d : sup_d) : s2 == 1 ? (is_supply ? dem_w : sup_w) : (is_supply ? dem_m : sup_m)
+        if oa.size() > 0
+            for q = 0 to oa.size() - 1
+                Zone oz = oa.get(q)
+                if not (s2 == 0 and (oz.rr or oz.retired or superseded(oa, q)))
+                    float ne = is_supply ? oz.b.get_top() : oz.b.get_bottom()
+                    if (is_supply ? ne < edge : ne > edge) and (na(best) or (is_supply ? ne > best : ne < best))
+                        best := ne
+        if not na(best)
+            break
+    best
+
+// event bits: 1 a visit started this bar, 2 first close inside on this visit, 4 close back out
+lab_scan(array<Zone> zs) =>
+    int ev = 0
+    int idx = -1
+    if zs.size() > 0
+        for i = 0 to zs.size() - 1
+            Zone z = zs.get(i)
+            int e = 0
+            if z.ct == time
+                z.lab_tc := z.touches
+            else
+                if z.touches > z.lab_tc
+                    e += 1
+                if z.zc_t == time
+                    e += 2
+                if z.x_t == time
+                    e += 4
+                z.lab_tc := z.touches
+            if e > 0 and idx < 0
+                ev := e
+                idx := i
+    [ev, idx]
+
+lab_pack(array<Zone> zs, bool is_supply, int ev, int idx) =>
+    float o_top = na
+    float o_btm = na
+    float o_vis = na
+    float o_pur = na
+    float o_sc = na
+    float o_tr = na
+    float o_ema = na
+    float o_zc = na
+    float o_x = na
+    float o_tgt = na
+    float o_fl = na
+    float o_ext = na
+    if ev > 0
+        flag_reactions(zs, is_supply, 0)
+        Zone z = zs.get(idx)
+        [r_top, r_btm, r_top_nm, r_btm_nm, r_top_t, r_btm_t] = range_levels()
+        [tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, spl] = score_zone(z, is_supply, r_top, r_btm, na, "")
+        [en, et] = ema_conf(z, is_supply)
+        o_top := z.b.get_top()
+        o_btm := z.b.get_bottom()
+        o_vis := z.touches
+        o_pur := purity_of(z, true)
+        o_sc := tot - a6
+        o_tr := a3
+        o_ema := en
+        o_zc := ev % 4 >= 2 ? z.zc_px : na
+        o_x := ev >= 4 ? z.x_px : na
+        o_tgt := lab_opp(is_supply, is_supply ? o_btm : o_top)
+        o_fl := (z.rr ? 1 : 0) + (z.retired ? 2 : 0) + (superseded(zs, idx) ? 4 : 0) + (z.gap_out ? 8 : 0) + (z.os ? 16 : 0)
+        o_ext := mr
+    [o_top, o_btm, o_vis, o_pur, o_sc, o_tr, o_ema, o_zc, o_x, o_tgt, o_fl, o_ext]
+
+[lab_sev, lab_si] = lab_scan(sup_d)
+[lab_dev, lab_di] = lab_scan(dem_d)
+[s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12] = lab_pack(sup_d, true, lab_sev, lab_si)
+[d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12] = lab_pack(dem_d, false, lab_dev, lab_di)
+plot(lab_sev > 0 ? lab_sev : na, "LAB s ev", display=display.data_window)
+plot(s1, "LAB s top", display=display.data_window)
+plot(s2, "LAB s btm", display=display.data_window)
+plot(s3, "LAB s vis", display=display.data_window)
+plot(s4, "LAB s pur", display=display.data_window)
+plot(s5, "LAB s score", display=display.data_window)
+plot(s6, "LAB s trend", display=display.data_window)
+plot(s7, "LAB s ema", display=display.data_window)
+plot(s8, "LAB s zc", display=display.data_window)
+plot(s9, "LAB s x", display=display.data_window)
+plot(s10, "LAB s tgt", display=display.data_window)
+plot(s11, "LAB s flags", display=display.data_window)
+plot(s12, "LAB s move", display=display.data_window)
+plot(lab_dev > 0 ? lab_dev : na, "LAB d ev", display=display.data_window)
+plot(d1, "LAB d top", display=display.data_window)
+plot(d2, "LAB d btm", display=display.data_window)
+plot(d3, "LAB d vis", display=display.data_window)
+plot(d4, "LAB d pur", display=display.data_window)
+plot(d5, "LAB d score", display=display.data_window)
+plot(d6, "LAB d trend", display=display.data_window)
+plot(d7, "LAB d ema", display=display.data_window)
+plot(d8, "LAB d zc", display=display.data_window)
+plot(d9, "LAB d x", display=display.data_window)
+plot(d10, "LAB d tgt", display=display.data_window)
+plot(d11, "LAB d flags", display=display.data_window)
+plot(d12, "LAB d move", display=display.data_window)

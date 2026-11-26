@@ -1,0 +1,260 @@
+
+######## Day  (BTCUSD, ETHUSD, NQ, NVDA, US30, USOIL)
+  THE INDICATOR AS IT IS (proper entry type, valid score, target = opposing zone)
+    Z0     3128 trades | win   22% ( 21/ 23) | avg +0.13R (+0.06/+0.19) | total  +392.0R
+    Z0.1   3081 trades | win   24% ( 23/ 24) | avg +0.13R (+0.08/+0.17) | total  +387.1R
+    Z0.5   2949 trades | win   29% ( 28/ 31) | avg +0.14R (+0.07/+0.20) | total  +405.2R
+    Z1     2746 trades | win   35% ( 33/ 36) | avg +0.15R (+0.07/+0.23) | total  +410.0R
+    Z2     2398 trades | win   43% ( 41/ 45) | avg +0.12R (+0.06/+0.19) | total  +292.2R
+    Z3     2093 trades | win   50% ( 48/ 52) | avg +0.12R (+0.06/+0.19) | total  +254.4R
+    T1     1675 trades | win   54% ( 54/ 54) | avg +0.09R (+0.09/+0.09) | total  +143.6R
+    T2     1153 trades | win   68% ( 68/ 68) | avg +0.03R (+0.03/+0.03) | total   +36.9R
+    T3      923 trades | win   77% ( 78/ 76) | avg +0.04R (+0.05/+0.03) | total   +36.6R
+    P33    3414 trades | win   43% ( 42/ 43) | avg +0.04R (+0.06/+0.03) | total  +151.6R
+    P50    3325 trades | win   36% ( 36/ 36) | avg +0.08R (+0.10/+0.06) | total  +275.1R
+    P75    3201 trades | win   28% ( 28/ 29) | avg +0.11R (+0.11/+0.12) | total  +363.2R
+    R1     3435 trades | win   46% ( 46/ 47) | avg -0.08R (-0.09/-0.07) | total  -265.0R
+    R2     3236 trades | win   34% ( 35/ 34) | avg +0.03R (+0.04/+0.03) | total  +112.0R
+    EMA9   3299 trades | win   25% ( 25/ 26) | avg +0.18R (+0.13/+0.23) | total  +593.7R
+  BENDING ONE RULE (stop at the far edge + 0.1, and the 9 EMA exit)
+    any entry type (all 3 on every valid visit) Z0.1  5275 trades | win   23% ( 23/ 24) | avg +0.02R (-0.04/+0.08) | total  +130.0R
+                                             EMA9  5845 trades | win   21% ( 21/ 22) | avg +0.07R (-0.04/+0.18) | total  +408.3R
+    Touch only                               Z0.1  3248 trades | win   22% ( 21/ 23) | avg +0.15R (+0.08/+0.21) | total  +475.1R
+                                             EMA9  3590 trades | win   25% ( 24/ 26) | avg +0.19R (+0.13/+0.25) | total  +695.9R
+    Zone only                                Z0.1  1411 trades | win   13% ( 13/ 13) | avg +0.01R (-0.07/+0.10) | total   +20.3R
+                                             EMA9  1450 trades | win   17% ( 16/ 17) | avg +0.42R (+0.17/+0.68) | total  +608.2R
+    Exit only                                Z0.1  2697 trades | win   37% ( 36/ 38) | avg +0.02R (-0.02/+0.06) | total   +62.8R
+                                             EMA9  2716 trades | win   29% ( 30/ 29) | avg +0.09R (+0.09/+0.09) | total  +242.9R
+    no EMA rule                              Z0.1  3081 trades | win   24% ( 23/ 24) | avg +0.13R (+0.08/+0.17) | total  +387.1R
+                                             EMA9  3299 trades | win   25% ( 25/ 26) | avg +0.18R (+0.13/+0.23) | total  +593.7R
+    score >= 12                              Z0.1  4838 trades | win   27% ( 27/ 27) | avg +0.07R (+0.04/+0.10) | total  +339.0R
+                                             EMA9  5053 trades | win   26% ( 25/ 26) | avg +0.13R (+0.11/+0.16) | total  +671.6R
+    score >= 16                              Z0.1  1497 trades | win   19% ( 17/ 20) | avg +0.22R (+0.15/+0.29) | total  +333.3R
+                                             EMA9  1567 trades | win   25% ( 24/ 27) | avg +0.33R (+0.20/+0.45) | total  +511.4R
+    score >= 18                              Z0.1   568 trades | win   17% ( 16/ 18) | avg +0.38R (+0.32/+0.44) | total  +213.9R
+                                             EMA9   581 trades | win   27% ( 23/ 32) | avg +0.33R (+0.19/+0.47) | total  +189.4R
+    with trend only                          Z0.1  1997 trades | win   27% ( 26/ 27) | avg +0.16R (+0.15/+0.16) | total  +313.6R
+                                             EMA9  2167 trades | win   26% ( 25/ 28) | avg +0.27R (+0.19/+0.34) | total  +578.1R
+    target within 3 zone heights             Z0.1   746 trades | win   41% ( 42/ 39) | avg -0.01R (+0.05/-0.05) | total    -4.0R
+                                             EMA9   741 trades | win   28% ( 27/ 29) | avg +0.32R (+0.07/+0.56) | total  +238.8R
+    target 3+ zone heights away              Z0.1  2404 trades | win   19% ( 18/ 20) | avg +0.17R (+0.11/+0.23) | total  +406.0R
+                                             EMA9  2632 trades | win   25% ( 24/ 25) | avg +0.14R (+0.16/+0.13) | total  +378.1R
+    reaction / retired zones allowed         Z0.1  4194 trades | win   23% ( 23/ 24) | avg +0.12R (+0.14/+0.11) | total  +520.4R
+                                             EMA9  4483 trades | win   26% ( 25/ 27) | avg +0.21R (+0.21/+0.21) | total  +950.6R
+  75% WIN SEARCH: 245 of 7500 combos have >= 75% wins and make money in both halves
+    et  score  ema  trend  dmax  first exit   n  win   wa   wb  avg   aa   ab
+  ZONE     14    0      0     2      1   T3 114 0.82 0.87 0.79 0.10 0.16 0.05
+  ZONE     14    0      0     2      0   T3 119 0.82 0.86 0.79 0.10 0.15 0.05
+  ZONE     14    0      4     2      0   Z3 107 0.79 0.82 0.75 0.09 0.13 0.05
+  ZONE     14    0      4     2      1   T3 102 0.81 0.85 0.78 0.08 0.13 0.04
+  ZONE     14    0      4     2      0   T3 107 0.81 0.84 0.79 0.08 0.12 0.05
+ TOUCH     14    0      0     2      1   Z3 386 0.81 0.82 0.80 0.08 0.10 0.06
+proper     14    0      0     2      1   Z3 386 0.81 0.82 0.80 0.08 0.10 0.06
+proper     14    0      0     2      0   Z3 413 0.81 0.83 0.80 0.08 0.10 0.05
+ TOUCH     14    0      0     2      0   Z3 403 0.81 0.82 0.79 0.08 0.10 0.05
+proper     14    0      4     2      0   Z3 362 0.81 0.82 0.80 0.07 0.08 0.05
+  BEST BY PROFIT (both halves positive, 60+ trades)
+  et  score  ema  trend  dmax  first exit   n  win   wa   wb  avg   aa   ab
+ZONE     12    1      4     2      1 EMA9 142 0.20 0.26 0.15 2.50 0.30 4.16
+ZONE      0    1      4     2      1 EMA9 172 0.20 0.25 0.15 2.19 0.43 3.75
+ZONE     12    1      4     2      0 EMA9 172 0.17 0.23 0.13 2.03 0.13 3.49
+ZONE     12    1      0     2      1 EMA9 186 0.18 0.23 0.13 1.84 0.19 3.26
+ZONE     12    0      4     2      1 EMA9 204 0.20 0.26 0.16 1.78 0.42 2.86
+ZONE     12    1      4     3      1 EMA9 243 0.18 0.20 0.16 1.78 0.02 3.19
+ZONE      0    1      4     3      1 EMA9 281 0.18 0.20 0.16 1.60 0.13 2.87
+ZONE     12    1      0     2      0 EMA9 220 0.17 0.22 0.13 1.53 0.08 2.79
+
+######## Longer  (BTCUSD, ETHUSD, NQ, NVDA, USOIL)
+  THE INDICATOR AS IT IS (proper entry type, valid score, target = opposing zone)
+    Z0     1907 trades | win   24% ( 25/ 22) | avg +0.20R (+0.36/+0.05) | total  +386.2R
+    Z0.1   1883 trades | win   25% ( 27/ 24) | avg +0.18R (+0.29/+0.07) | total  +336.0R
+    Z0.5   1793 trades | win   30% ( 31/ 30) | avg +0.10R (+0.14/+0.06) | total  +177.9R
+    Z1     1676 trades | win   35% ( 35/ 36) | avg +0.08R (+0.12/+0.04) | total  +136.1R
+    Z2     1452 trades | win   44% ( 44/ 45) | avg +0.11R (+0.14/+0.08) | total  +153.9R
+    Z3     1291 trades | win   50% ( 49/ 51) | avg +0.07R (+0.09/+0.05) | total   +90.0R
+    T1     1040 trades | win   53% ( 54/ 51) | avg +0.05R (+0.08/+0.03) | total   +56.4R
+    T2      698 trades | win   66% ( 66/ 66) | avg -0.00R (-0.00/-0.01) | total    -2.2R
+    T3      617 trades | win   74% ( 74/ 74) | avg -0.00R (+0.01/-0.01) | total    -0.8R
+    P33    2055 trades | win   44% ( 45/ 43) | avg +0.05R (+0.09/+0.00) | total   +92.9R
+    P50    2020 trades | win   37% ( 39/ 35) | avg +0.11R (+0.18/+0.04) | total  +218.1R
+    P75    1940 trades | win   30% ( 31/ 28) | avg +0.12R (+0.22/+0.02) | total  +224.7R
+    R1     2078 trades | win   48% ( 49/ 46) | avg -0.05R (-0.02/-0.07) | total   -98.0R
+    R2     2005 trades | win   36% ( 37/ 35) | avg +0.08R (+0.12/+0.04) | total  +161.0R
+    EMA9   1969 trades | win   26% ( 28/ 24) | avg +0.34R (+0.46/+0.22) | total  +663.9R
+  BENDING ONE RULE (stop at the far edge + 0.1, and the 9 EMA exit)
+    any entry type (all 3 on every valid visit) Z0.1  3199 trades | win   24% ( 24/ 23) | avg +0.09R (+0.25/-0.08) | total  +273.4R
+                                             EMA9  3410 trades | win   21% ( 22/ 19) | avg +0.13R (+0.26/+0.00) | total  +454.4R
+    Touch only                               Z0.1  1950 trades | win   24% ( 25/ 24) | avg +0.20R (+0.31/+0.10) | total  +399.6R
+                                             EMA9  2109 trades | win   26% ( 28/ 24) | avg +0.40R (+0.62/+0.20) | total  +851.8R
+    Zone only                                Z0.1   909 trades | win   17% ( 19/ 15) | avg +0.48R (+0.95/+0.06) | total  +436.8R
+                                             EMA9   933 trades | win   20% ( 24/ 15) | avg +0.74R (+1.24/+0.29) | total  +693.6R
+    Exit only                                Z0.1  1589 trades | win   36% ( 37/ 36) | avg -0.01R (+0.04/-0.07) | total   -20.6R
+                                             EMA9  1567 trades | win   30% ( 28/ 31) | avg +0.22R (+0.21/+0.24) | total  +350.0R
+    no EMA rule                              Z0.1  1883 trades | win   25% ( 27/ 24) | avg +0.18R (+0.29/+0.07) | total  +336.0R
+                                             EMA9  1969 trades | win   26% ( 28/ 24) | avg +0.34R (+0.46/+0.22) | total  +663.9R
+    score >= 12                              Z0.1  2885 trades | win   28% ( 29/ 27) | avg +0.12R (+0.24/+0.01) | total  +344.8R
+                                             EMA9  2987 trades | win   27% ( 28/ 25) | avg +0.28R (+0.41/+0.15) | total  +840.0R
+    score >= 16                              Z0.1   923 trades | win   19% ( 20/ 18) | avg +0.24R (+0.37/+0.11) | total  +220.0R
+                                             EMA9   961 trades | win   24% ( 25/ 24) | avg +0.24R (+0.38/+0.10) | total  +228.9R
+    score >= 18                              Z0.1   344 trades | win   15% ( 18/ 11) | avg +0.06R (+0.33/-0.23) | total   +19.7R
+                                             EMA9   355 trades | win   21% ( 24/ 19) | avg -0.06R (+0.07/-0.20) | total   -21.2R
+    with trend only                          Z0.1  1248 trades | win   28% ( 30/ 27) | avg +0.24R (+0.44/+0.05) | total  +294.3R
+                                             EMA9  1346 trades | win   27% ( 28/ 26) | avg +0.35R (+0.51/+0.20) | total  +472.2R
+    target within 3 zone heights             Z0.1   494 trades | win   44% ( 47/ 42) | avg +0.14R (+0.18/+0.09) | total   +67.1R
+                                             EMA9   495 trades | win   32% ( 32/ 31) | avg +0.36R (+0.41/+0.32) | total  +179.8R
+    target 3+ zone heights away              Z0.1  1432 trades | win   19% ( 20/ 18) | avg +0.19R (+0.33/+0.06) | total  +276.2R
+                                             EMA9  1540 trades | win   25% ( 27/ 22) | avg +0.33R (+0.48/+0.17) | total  +505.4R
+    reaction / retired zones allowed         Z0.1  2451 trades | win   24% ( 24/ 24) | avg +0.10R (+0.15/+0.05) | total  +246.8R
+                                             EMA9  2578 trades | win   26% ( 27/ 26) | avg +0.31R (+0.38/+0.25) | total  +811.1R
+  75% WIN SEARCH: 248 of 7230 combos have >= 75% wins and make money in both halves
+    et  score  ema  trend  dmax  first exit    n  win   wa   wb  avg   aa   ab
+ TOUCH     12    1      4     3      0   Z3  475 0.80 0.80 0.81 0.13 0.12 0.13
+ TOUCH     12    1      4     2      0   Z2  307 0.80 0.79 0.81 0.13 0.10 0.15
+ TOUCH      0    1      4     3      0   Z2 1216 0.77 0.77 0.76 0.12 0.13 0.12
+ TOUCH      0    1      4     5      0   Z3 1502 0.77 0.77 0.77 0.12 0.11 0.13
+ TOUCH     12    1      0     2      0   Z2  395 0.79 0.79 0.79 0.12 0.12 0.12
+proper     12    1      4     3      0   Z3  454 0.80 0.79 0.80 0.12 0.11 0.12
+proper     12    1      4     3      1   Z3  389 0.80 0.80 0.80 0.12 0.11 0.12
+ TOUCH     12    1      4     3      1   Z3  389 0.80 0.80 0.80 0.12 0.11 0.12
+proper     14    1      0     3      0   Z3  236 0.78 0.79 0.77 0.11 0.13 0.10
+ TOUCH     14    1      0     3      0   Z3  235 0.78 0.79 0.77 0.11 0.13 0.10
+  BEST BY PROFIT (both halves positive, 60+ trades)
+    et  score  ema  trend  dmax  first exit    n  win   wa   wb  avg   aa   ab
+  ZONE     16    1      4    99      0   Z0  121 0.15 0.17 0.12 1.75 3.14 0.24
+  ZONE     14    1      4    99      0 EMA9  246 0.17 0.23 0.12 1.60 3.05 0.32
+  ZONE     16    1      0    99      0   Z0  150 0.13 0.16 0.10 1.53 2.80 0.04
+  EXIT      0    1      0     5      0 EMA9 2103 0.33 0.35 0.31 1.41 2.81 0.21
+proper      0    1      0     5      0 EMA9 2268 0.30 0.31 0.29 1.36 2.65 0.24
+  EXIT      0    1      0     3      0 EMA9 1796 0.34 0.36 0.31 1.26 2.52 0.22
+proper      0    1      0     3      0 EMA9 1838 0.31 0.32 0.30 1.26 2.46 0.26
+  ZONE     14    1      0    99      0 EMA9  329 0.17 0.23 0.12 1.25 2.22 0.35
+
+######## Scalping  (BTCUSD, ETHUSD, NQ, NVDA, US30, USOIL)
+  THE INDICATOR AS IT IS (proper entry type, valid score, target = opposing zone)
+    Z0      816 trades | win   12% ( 10/ 14) | avg -0.00R (-0.15/+0.14) | total    -1.4R
+    Z0.1    804 trades | win   14% ( 12/ 15) | avg +0.10R (-0.04/+0.24) | total   +78.3R
+    Z0.5    775 trades | win   17% ( 16/ 19) | avg +0.09R (+0.06/+0.13) | total   +72.8R
+    Z1      742 trades | win   23% ( 22/ 24) | avg +0.09R (+0.02/+0.17) | total   +70.1R
+    Z2      702 trades | win   28% ( 27/ 29) | avg -0.02R (-0.06/+0.02) | total   -14.0R
+    Z3      661 trades | win   33% ( 32/ 33) | avg -0.06R (-0.06/-0.05) | total   -38.0R
+    T1      484 trades | win   50% ( 46/ 55) | avg +0.00R (-0.08/+0.10) | total    +1.9R
+    T2      385 trades | win   63% ( 58/ 68) | avg -0.04R (-0.12/+0.05) | total   -13.6R
+    T3      344 trades | win   70% ( 65/ 74) | avg -0.03R (-0.10/+0.03) | total   -10.8R
+    P33     875 trades | win   31% ( 31/ 32) | avg +0.11R (+0.12/+0.09) | total   +92.8R
+    P50     854 trades | win   25% ( 24/ 26) | avg +0.16R (+0.12/+0.20) | total  +135.5R
+    P75     823 trades | win   19% ( 18/ 21) | avg +0.19R (+0.08/+0.29) | total  +154.6R
+    R1      896 trades | win   46% ( 45/ 47) | avg -0.07R (-0.10/-0.05) | total   -66.0R
+    R2      885 trades | win   36% ( 35/ 36) | avg +0.07R (+0.05/+0.09) | total   +66.0R
+    EMA9    884 trades | win   23% ( 21/ 24) | avg +0.08R (+0.07/+0.08) | total   +69.9R
+  BENDING ONE RULE (stop at the far edge + 0.1, and the 9 EMA exit)
+    any entry type (all 3 on every valid visit) Z0.1  1244 trades | win   13% ( 12/ 14) | avg -0.15R (-0.23/-0.06) | total  -186.0R
+                                             EMA9  1449 trades | win   18% ( 17/ 19) | avg -0.12R (-0.13/-0.12) | total  -177.7R
+    Touch only                               Z0.1   804 trades | win   14% ( 12/ 15) | avg +0.10R (-0.04/+0.24) | total   +78.3R
+                                             EMA9   884 trades | win   23% ( 21/ 24) | avg +0.08R (+0.07/+0.08) | total   +69.9R
+    Zone only                                Z0.1   367 trades | win    9% (  7/ 11) | avg +0.14R (-0.12/+0.38) | total   +49.9R
+                                             EMA9   382 trades | win   14% ( 10/ 19) | avg +0.04R (-0.26/+0.33) | total   +15.7R
+    Exit only                                Z0.1   575 trades | win   22% ( 20/ 23) | avg -0.13R (-0.23/-0.03) | total   -76.2R
+                                             EMA9   620 trades | win   27% ( 25/ 29) | avg -0.03R (-0.03/-0.02) | total   -15.7R
+    no EMA rule                              Z0.1  1581 trades | win   15% ( 15/ 15) | avg +0.04R (+0.05/+0.03) | total   +62.4R
+                                             EMA9  1752 trades | win   24% ( 25/ 24) | avg +0.09R (+0.13/+0.05) | total  +154.0R
+    score >= 12                              Z0.1  1824 trades | win   25% ( 23/ 26) | avg +0.27R (+0.15/+0.40) | total  +497.2R
+                                             EMA9  2076 trades | win   25% ( 25/ 26) | avg +0.12R (+0.15/+0.10) | total  +254.4R
+    score >= 16                              Z0.1   804 trades | win   14% ( 12/ 15) | avg +0.10R (-0.04/+0.24) | total   +78.3R
+                                             EMA9   884 trades | win   23% ( 21/ 24) | avg +0.08R (+0.07/+0.08) | total   +69.9R
+    score >= 18                              Z0.1   335 trades | win   11% ( 11/ 11) | avg +0.13R (+0.13/+0.13) | total   +44.4R
+                                             EMA9   352 trades | win   21% ( 21/ 20) | avg +0.05R (+0.17/-0.06) | total   +18.1R
+    with trend only                          Z0.1   577 trades | win   14% ( 11/ 16) | avg +0.04R (-0.16/+0.25) | total   +22.6R
+                                             EMA9   631 trades | win   22% ( 20/ 25) | avg +0.03R (-0.04/+0.09) | total   +17.0R
+    target within 3 zone heights             Z0.1    12 trades | win   42% ( 20/ 57) | avg +0.01R (-0.70/+0.52) | total    +0.1R
+                                             EMA9    13 trades | win   31% (  0/ 50) | avg -0.08R (-0.60/+0.24) | total    -1.1R
+    target 3+ zone heights away              Z0.1   793 trades | win   13% ( 12/ 15) | avg +0.10R (-0.03/+0.23) | total   +77.1R
+                                             EMA9   872 trades | win   22% ( 21/ 24) | avg +0.08R (+0.08/+0.08) | total   +70.9R
+    reaction / retired zones allowed         Z0.1  1069 trades | win   13% ( 12/ 15) | avg +0.05R (-0.09/+0.19) | total   +55.2R
+                                             EMA9  1203 trades | win   23% ( 21/ 24) | avg +0.15R (+0.17/+0.14) | total  +185.7R
+  75% WIN SEARCH: 28 of 7380 combos have >= 75% wins and make money in both halves
+    et  score  ema  trend  dmax  first exit    n  win   wa   wb  avg   aa   ab
+  EXIT     14    1      4     2      0  P50  177 0.82 0.78 0.86 0.05 0.00 0.11
+  EXIT     14    1      4     2      1  P50  167 0.81 0.78 0.85 0.05 0.00 0.10
+proper     14    0      0     5      1   T3 1440 0.78 0.75 0.81 0.05 0.01 0.09
+ TOUCH     14    0      0     5      1   T3 1440 0.78 0.75 0.81 0.05 0.01 0.09
+ TOUCH     14    0      0     5      0   T3 1619 0.78 0.75 0.81 0.04 0.01 0.08
+  ZONE     16    0      0     5      0   T3  147 0.78 0.77 0.78 0.04 0.03 0.05
+  ZONE     16    0      0     5      1   T3  146 0.77 0.77 0.78 0.04 0.02 0.05
+ TOUCH      0    1      0     5      0   T3 4113 0.77 0.75 0.79 0.03 0.00 0.05
+  EXIT     12    1      0     3      1   Z3  627 0.79 0.77 0.82 0.03 0.00 0.06
+proper      0    0      0     5      1   T3 3470 0.77 0.75 0.78 0.03 0.01 0.04
+  BEST BY PROFIT (both halves positive, 60+ trades)
+  et  score  ema  trend  dmax  first exit   n  win   wa   wb  avg   aa   ab
+ZONE     18    0      0    99      1  P50 288 0.19 0.21 0.16 0.64 0.40 0.90
+ZONE     18    0      0    99      0  P50 292 0.18 0.21 0.16 0.62 0.39 0.86
+ZONE     12    1      4     3      1 EMA9 174 0.26 0.25 0.27 0.59 0.82 0.36
+ZONE     18    0      4    99      1  P50 256 0.17 0.18 0.17 0.57 0.11 1.06
+ZONE     18    0      0    99      1  P75 288 0.12 0.13 0.12 0.57 0.12 1.06
+ZONE     16    0      0     5      0   Z0 147 0.21 0.18 0.25 0.57 0.69 0.44
+ZONE     18    0      4    99      0  P50 260 0.17 0.17 0.16 0.55 0.10 1.02
+ZONE     18    0      0    99      0  P75 292 0.12 0.13 0.12 0.55 0.11 1.02
+
+######## Swing  (BTCUSD, ETHUSD, NQ, NVDA, US30, USOIL)
+  THE INDICATOR AS IT IS (proper entry type, valid score, target = opposing zone)
+    Z0     2920 trades | win   21% ( 22/ 20) | avg +0.11R (+0.20/+0.03) | total  +317.5R
+    Z0.1   2894 trades | win   22% ( 23/ 22) | avg +0.12R (+0.24/+0.01) | total  +354.8R
+    Z0.5   2747 trades | win   28% ( 30/ 27) | avg +0.12R (+0.23/+0.02) | total  +328.9R
+    Z1     2583 trades | win   34% ( 36/ 32) | avg +0.12R (+0.23/+0.02) | total  +320.3R
+    Z2     2272 trades | win   42% ( 43/ 41) | avg +0.11R (+0.17/+0.05) | total  +245.7R
+    Z3     2013 trades | win   49% ( 50/ 48) | avg +0.12R (+0.16/+0.08) | total  +244.4R
+    T1     1538 trades | win   55% ( 57/ 54) | avg +0.11R (+0.13/+0.07) | total  +162.3R
+    T2      988 trades | win   68% ( 70/ 67) | avg +0.03R (+0.05/+0.01) | total   +29.9R
+    T3      744 trades | win   76% ( 76/ 76) | avg +0.03R (+0.03/+0.02) | total   +20.7R
+    P33    3124 trades | win   41% ( 42/ 39) | avg +0.02R (+0.07/-0.02) | total   +77.6R
+    P50    3066 trades | win   34% ( 36/ 33) | avg +0.09R (+0.16/+0.02) | total  +264.7R
+    P75    2978 trades | win   27% ( 28/ 26) | avg +0.12R (+0.19/+0.05) | total  +346.6R
+    R1     3171 trades | win   45% ( 47/ 44) | avg -0.09R (-0.06/-0.13) | total  -298.0R
+    R2     3060 trades | win   35% ( 36/ 33) | avg +0.04R (+0.09/-0.00) | total  +127.6R
+    EMA9   3008 trades | win   27% ( 27/ 26) | avg +0.26R (+0.36/+0.17) | total  +793.0R
+  BENDING ONE RULE (stop at the far edge + 0.1, and the 9 EMA exit)
+    any entry type (all 3 on every valid visit) Z0.1  4912 trades | win   23% ( 23/ 22) | avg +0.04R (+0.15/-0.07) | total  +204.8R
+                                             EMA9  5229 trades | win   21% ( 22/ 21) | avg +0.07R (+0.14/+0.00) | total  +366.0R
+    Touch only                               Z0.1  3009 trades | win   21% ( 22/ 20) | avg +0.16R (+0.32/+0.00) | total  +479.1R
+                                             EMA9  3214 trades | win   26% ( 27/ 26) | avg +0.28R (+0.36/+0.20) | total  +898.9R
+    Zone only                                Z0.1  1245 trades | win   15% ( 16/ 14) | avg +0.27R (+0.49/+0.07) | total  +335.5R
+                                             EMA9  1265 trades | win   17% ( 18/ 17) | avg +0.35R (+0.45/+0.26) | total  +441.3R
+    Exit only                                Z0.1  2505 trades | win   35% ( 36/ 35) | avg -0.06R (-0.04/-0.07) | total  -149.1R
+                                             EMA9  2469 trades | win   27% ( 28/ 27) | avg +0.04R (+0.10/-0.02) | total   +98.1R
+    no EMA rule                              Z0.1  2894 trades | win   22% ( 23/ 22) | avg +0.12R (+0.24/+0.01) | total  +354.8R
+                                             EMA9  3008 trades | win   27% ( 27/ 26) | avg +0.26R (+0.36/+0.17) | total  +793.0R
+    score >= 12                              Z0.1  4386 trades | win   26% ( 26/ 26) | avg +0.06R (+0.09/+0.02) | total  +247.2R
+                                             EMA9  4514 trades | win   26% ( 26/ 27) | avg +0.20R (+0.20/+0.19) | total  +886.2R
+    score >= 16                              Z0.1  1510 trades | win   17% ( 19/ 16) | avg +0.18R (+0.37/-0.01) | total  +267.7R
+                                             EMA9  1552 trades | win   26% ( 27/ 26) | avg +0.23R (+0.31/+0.15) | total  +359.4R
+    score >= 18                              Z0.1   599 trades | win   16% ( 17/ 14) | avg +0.39R (+0.68/+0.09) | total  +234.9R
+                                             EMA9   610 trades | win   26% ( 29/ 24) | avg +0.27R (+0.41/+0.12) | total  +163.2R
+    with trend only                          Z0.1  1847 trades | win   26% ( 26/ 25) | avg +0.20R (+0.31/+0.10) | total  +371.3R
+                                             EMA9  1953 trades | win   27% ( 27/ 27) | avg +0.33R (+0.44/+0.22) | total  +636.7R
+    target within 3 zone heights             Z0.1   584 trades | win   44% ( 45/ 44) | avg +0.18R (+0.22/+0.14) | total  +102.2R
+                                             EMA9   582 trades | win   31% ( 30/ 31) | avg +0.41R (+0.49/+0.33) | total  +235.9R
+    target 3+ zone heights away              Z0.1  2364 trades | win   17% ( 19/ 16) | avg +0.12R (+0.25/-0.01) | total  +272.8R
+                                             EMA9  2506 trades | win   25% ( 26/ 25) | avg +0.21R (+0.31/+0.13) | total  +538.3R
+    reaction / retired zones allowed         Z0.1  3903 trades | win   22% ( 23/ 21) | avg +0.12R (+0.21/+0.03) | total  +465.9R
+                                             EMA9  4072 trades | win   26% ( 27/ 26) | avg +0.24R (+0.28/+0.20) | total  +977.0R
+  75% WIN SEARCH: 138 of 7455 combos have >= 75% wins and make money in both halves
+    et  score  ema  trend  dmax  first exit    n  win   wa   wb  avg   aa   ab
+ TOUCH     16    1      0     5      0   T3  195 0.83 0.87 0.78 0.10 0.16 0.04
+proper     16    1      0     5      1   T3  192 0.82 0.87 0.78 0.10 0.16 0.04
+ TOUCH     16    1      0     5      1   T3  192 0.82 0.87 0.78 0.10 0.16 0.04
+proper     16    1      0     5      0   T3  196 0.82 0.87 0.78 0.10 0.16 0.04
+ TOUCH     16    1      4     5      0   T3  183 0.82 0.88 0.77 0.09 0.17 0.02
+ TOUCH     16    1      4     5      1   T3  180 0.82 0.87 0.77 0.09 0.16 0.02
+proper     16    1      4     5      1   T3  180 0.82 0.87 0.77 0.09 0.16 0.02
+proper     16    1      4     5      0   T3  184 0.82 0.87 0.77 0.09 0.16 0.02
+ TOUCH     16    1      4    99      0   T3  552 0.78 0.79 0.77 0.07 0.07 0.06
+ TOUCH     14    1      4    99      0   T3 1052 0.79 0.80 0.77 0.07 0.07 0.06
+  BEST BY PROFIT (both halves positive, 60+ trades)
+    et  score  ema  trend  dmax  first exit   n  win   wa   wb  avg   aa   ab
+  ZONE     18    0      4    99      1   Z0 185 0.14 0.15 0.12 0.99 1.66 0.40
+  ZONE     18    0      4    99      0   Z0 189 0.13 0.15 0.12 0.95 1.60 0.37
+  ZONE     18    0      0    99      1   Z0 206 0.13 0.14 0.11 0.85 1.52 0.26
+  ZONE     18    0      0    99      0   Z0 210 0.12 0.14 0.11 0.82 1.47 0.23
+  ZONE     16    1      4    99      0 EMA9 176 0.17 0.18 0.16 0.78 1.53 0.09
+  ZONE     18    0      4    99      1 Z0.1 185 0.14 0.16 0.12 0.76 1.35 0.24
+proper     16    1      0     5      0 EMA9 196 0.29 0.27 0.31 0.75 1.02 0.51
+ TOUCH     16    1      0     5      0 EMA9 195 0.29 0.28 0.30 0.74 1.02 0.47

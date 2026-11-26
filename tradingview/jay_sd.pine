@@ -109,6 +109,7 @@ int target_tr = input.int(40, 'Target Zone Fill Transparency', minval=0, maxval=
 color label_color = input.color(color.white, 'Text Color', group=visual_group)
 bool show_zigzag = input.bool(false, 'Show Zig Zag (chart timeframe)', group=visual_group)
 bool show_trend = input.bool(true, 'Show Trend Readout', group=visual_group, tooltip='A box in the top right corner with the trend state of the High timeframe (top, for context), the Trend Timeframe (the Mid timeframe, scored) and the Low timeframe, read from the zig zag swings with the 3 segment rule: higher highs and higher lows is UP, lower highs and lower lows is DOWN, anything else is RANGE. The control point is the last higher low (up) or lower high (down); a close through it ends the trend.')
+bool show_tlines = input.bool(true, 'Trend Change Lines', group=visual_group, tooltip='A line across the chart with a price tag on the price scale at every price that changes the trend of the three timeframes of the Trading Style (High, Mid and Low), as in the trend readout: green turns or resumes it UP, red turns or resumes it DOWN. UP or DOWN: the control point. Consolidation: the control point and the last swing that resumes the old trend. Range: the swing high and the swing low.')
 bool show_fib = input.bool(true, 'Show High Timeframe Fib Range', group=visual_group, tooltip='Draws the range the Range score uses: a fib on the High timeframe (the highest of the three, set by the trading style), zone to zone: from the near edge of the High timeframe supply the last swing high came out of to the near edge of the High timeframe demand the last swing low came out of. An end with no such zone uses the swing price itself. Lines at 0, 25, 50, 75 and 100%. Demand in the bottom 25% scores 2 and below 75% scores 1; supply in the top 25% scores 2 and above 25% scores 1.')
 bool trend_auto = input.bool(true, 'Trend Readout Uses The Mid Timeframe', group=visual_group, tooltip='On: the readout scores the trend of the style\'s Mid timeframe. Off: it uses the Trend Timeframe below.')
 string trend_tf_in = input.timeframe('W', 'Trend Timeframe (when not automatic)', group=visual_group)
@@ -1679,6 +1680,37 @@ if barstate.islast and show_trend
     trend_box.cell(0, 4, "EMA SIGNAL: " + ema_sig_s(), text_color=ema_sig == 1 ? color.new(#2ECC71, 10) : ema_sig == -1 ? color.new(#FF6B6B, 10) : color.new(color.white, 30), text_size=size.tiny, text_halign=text.align_left)
     if timeframe.in_seconds(TF0) * 100 < chart_sec
         trend_box.cell(0, 5, "Chart timeframe is far above the Low timeframe (" + tf_name(TF0) + "). Drop the chart to " + tf_name(TF1) + " or lower for reliable zones.", text_color=color.orange, text_size=size.tiny, text_halign=text.align_left)
+
+// Trend change lines (Jay): the prices from the readout, drawn across the chart with a tag on the price scale.
+// Returns [up price, down price]: the close above / trade above that makes it UP, the close below / trade below that makes it DOWN
+tl_levels(int st, float cp, float sh1, float sl1, bool cons) =>
+    float up = st == -1 ? cp : st == 1 and cons ? sh1 : st == 0 ? sh1 : na
+    float dn = st == 1 ? cp : st == -1 and cons ? sl1 : st == 0 ? sl1 : na
+    [up, dn]
+[tlh_up, tlh_dn] = tl_levels(ht_st, ht_cp, ht_sh1, ht_sl1, ht_cons)
+[tlm_up, tlm_dn] = tl_levels(t_st, t_cp, t_sh1, t_sl1, t_cons)
+[tll_up, tll_dn] = tl_levels(l_st, l_cp, l_sh1, l_sl1, l_cons)
+bool tl_low_own = timeframe.in_seconds(trend_tf) != timeframe.in_seconds(TF0)
+color tl_col_up = color.new(#2ECC71, 20)
+color tl_col_dn = color.new(#FF5252, 20)
+plot(show_tlines ? tlh_up : na, 'High TF UP price', color=tl_col_up, linewidth=1, trackprice=true, show_last=1, display=display.pane + display.price_scale)
+plot(show_tlines ? tlh_dn : na, 'High TF DOWN price', color=tl_col_dn, linewidth=1, trackprice=true, show_last=1, display=display.pane + display.price_scale)
+plot(show_tlines ? tlm_up : na, 'Mid TF UP price', color=tl_col_up, linewidth=2, trackprice=true, show_last=1, display=display.pane + display.price_scale)
+plot(show_tlines ? tlm_dn : na, 'Mid TF DOWN price', color=tl_col_dn, linewidth=2, trackprice=true, show_last=1, display=display.pane + display.price_scale)
+plot(show_tlines and tl_low_own ? tll_up : na, 'Low TF UP price', color=tl_col_up, linewidth=1, trackprice=true, show_last=1, display=display.pane + display.price_scale)
+plot(show_tlines and tl_low_own ? tll_dn : na, 'Low TF DOWN price', color=tl_col_dn, linewidth=1, trackprice=true, show_last=1, display=display.pane + display.price_scale)
+// names on the lines (plot titles cannot carry the timeframe), right of the last candle
+var array<label> tl_labels = array.new<label>()
+if barstate.islast
+    while tl_labels.size() > 0
+        tl_labels.pop().delete()
+    if show_tlines
+        array<float> tl_px = array.from(tlh_up, tlh_dn, tlm_up, tlm_dn, tl_low_own ? tll_up : na, tl_low_own ? tll_dn : na)
+        array<string> tl_nm = array.from(tf_name(TF2) + " UP", tf_name(TF2) + " DOWN", tf_name(trend_tf) + " UP", tf_name(trend_tf) + " DOWN", tf_name(TF0) + " UP", tf_name(TF0) + " DOWN")
+        for k = 0 to 5
+            float v = tl_px.get(k)
+            if not na(v)
+                tl_labels.push(label.new(bar_index + 3, v, tl_nm.get(k) + " " + str.tostring(v, format.mintick), style=label.style_label_lower_left, color=color.new(color.white, 100), textcolor=k % 2 == 0 ? tl_col_up : tl_col_dn, size=size.tiny))
 
 //-----------------------------------------------------------------------------
 // SETUP SCORE AND ALERTS

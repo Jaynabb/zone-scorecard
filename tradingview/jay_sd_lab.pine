@@ -455,7 +455,9 @@ detect(bool is_supply, int k, float yard) =>
         // draws a one candle base at a V low or V high.
         if cnt == 0
             int off = k + 1 + legs
-            bool holds_extreme = is_supply ? high[off] >= high[k] : low[off] <= low[k]
+            // it is the turn only if it holds the extreme on both sides: a candle the one before it out-reached is still
+            // the move in (BTC 5M 19:25 under the 19:20 high, inside the drop off Jay's 19:15 supply)
+            bool holds_extreme = is_supply ? high[off] >= high[k] and high[off] >= nz(high[off + 1]) : low[off] <= low[k] and low[off] <= nz(low[off + 1], low[off])
             bool normal_size = gap_imp or math.abs(close[off] - open[off]) <= drive
             if not na(close[off]) and holds_extreme and normal_size
                 z_top := is_supply ? high[off] : math.max(open[off], close[off])
@@ -476,10 +478,15 @@ detect(bool is_supply, int k, float yard) =>
 
 // True when price travelled at least dep_mult x zone height beyond the zone edge over the k closed candles starting at the impulse.
 // Also returns the furthest price reached, so the move score counts the follow-through that came before the zone was drawn.
+// The height counted is capped at four typical bodies: a tall zone (a doji base with a long rejection wick) that price
+// left by four typical bodies has departed strongly (BTC 5M 19:15 supply 60873-61484, Jay's marked zone)
+dep_need(float top, float btm, float yard) =>
+    math.min(top - btm, na(yard) ? top - btm : 4 * yard) * dep_mult
+
 departs(bool is_supply, int k, float top, float btm, float yard) =>
     bool ok = false
     float out = na
-    float need = (top - btm) * dep_mult
+    float need = dep_need(top, btm, yard)
     if not na(top) and not na(btm) and k >= 1
         float ext = na
         for i = 1 to k
@@ -506,7 +513,7 @@ candidate(bool is_supply, float yard) =>
             [fk, tk, bk, lk, nk, ik, tnk, ak, ck, xk, gk, ok_, amk] = detect(is_supply, k, yard)
             if fk
                 [depk, mxk] = departs(is_supply, k, tk, bk, yard)
-                float need = (tk - bk) * dep_mult
+                float need = dep_need(tk, bk, yard)
                 // reached on the last closed candle only: everything from the impulse to the candle before fell short
                 float prev = na
                 for i = 2 to k
@@ -842,6 +849,8 @@ add_once(array<Zone> zones, bool is_supply, int slot, bool found, float top, flo
             if seen_keys.size() > 400
                 seen_keys.pop()
             create_zone(zones, is_supply, top, btm, lt, slot, atr_tf, n, imp_t, gp, go, false, mx)
+            if slot == 0
+                log.info((is_supply ? "SUP " : "DEM ") + str.tostring(btm) + "-" + str.tostring(top) + " base " + str.format_time(lt, "MM-dd HH:mm", "America/New_York") + " n " + str.tostring(n) + " imp " + str.format_time(imp_t, "MM-dd HH:mm", "America/New_York"))
 
 // Oppositional structure covers the whole directional move out of the zone, not just the impulse candle:
 // until the zone's first retest, any close through an opposing zone of the same timeframe that already existed
@@ -1039,7 +1048,11 @@ flag_reactions(array<Zone> zs, bool is_supply, int slot) =>
                         // newest base is the one traded, see superseded); only a higher timeframe zone makes it a reaction
                         if not (s2 == slot and (q == i or slot == 0))
                             float ov = math.min(z.b.get_top(), oz.b.get_top()) - math.max(z.b.get_bottom(), oz.b.get_bottom())
-                            if not na(oz.it) and oz.lt < z.lt and oz.it + tf_ms <= z.lt and ov >= 0.5 * h
+                            // and the base's near edge (its body side) is inside the older zone too: a base whose body sits
+                            // outside it, with only a wick reaching in, is a new base off that zone, not chop inside it
+                            // (BTC 5M 19:15 supply 60873-61484 off the older 1H supply 61017-61488, Jay's marked zone)
+                            bool near_in = is_supply ? z.b.get_bottom() >= oz.b.get_bottom() : z.b.get_top() <= oz.b.get_top()
+                            if not na(oz.it) and oz.lt < z.lt and oz.it + tf_ms <= z.lt and ov >= 0.5 * h and near_in
                                 hit := true
                                 break
                 if hit

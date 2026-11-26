@@ -43,6 +43,14 @@ Examples: USOIL 5M 81.26-81.36 (base 06:05-06:10; 06:15 to 07:00 is the move up)
   wick is long. Then the zone runs from the long wick to the body's far side. Example: NQ 1H 16:00 supply
   (26215.25-26284.25).
 
+## 4b. Departure and V turns
+
+- A zone must be left by at least its own height, but never more than four typical bodies is asked for: a tall zone
+  from a long rejection wick that price left by four typical bodies has departed (BTC 5M 19:15 supply, 611 points tall,
+  left by 487).
+- A one candle V turn base must hold the extreme against the candles on both sides. A candle the one before it reached
+  past is still the move in (BTC 5M 19:25 under the 19:20 high was wrongly drawn as 60748-60864).
+
 ## 5. A zone stays valid until a candle of its own timeframe closes through it
 
 - Wicks through a zone do not break it.
@@ -51,7 +59,9 @@ Examples: USOIL 5M 81.26-81.36 (base 06:05-06:10; 06:15 to 07:00 is the move up)
 ## 6. Newest base wins on the entry timeframe
 
 - When price comes back to an older zone and bases again, the new base is the zone and the older one is hidden.
-- A base that is only a reaction off a higher timeframe zone is not a new zone.
+- A base that is only a reaction off a higher timeframe zone is not a new zone: that means the base, body side included,
+  sits inside the older higher zone. A base whose body is outside it, with only a wick reaching in, is a new zone.
+  Example: BTC 5M 19:15 supply 60873-61484 (Jay's), its spike wick into the older 1H supply 61017-61488.
 - **Origin zones stay on the chart.** When price comes back to a valid zone, bases on it and leaves again, the
   retest base may be drawn too, but the older zone is the origin of the move and always stays visible (dashed once
   touched) until a close goes through it. It shows twice as far from price as other old zones, so the chart

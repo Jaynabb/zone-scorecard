@@ -1437,7 +1437,15 @@ fib_pack() =>
 
 trend_line(string nm, int st, float cp, float sh1, float sh2, float sl1, float sl2, bool cons) =>
     string st_s = cons ? "CONSOLIDATION (" + (st == 1 ? "up" : "down") + "trend stalled, no new " + (st == 1 ? "high" : "low") + ")" : st == 1 ? "UP" : st == -1 ? "DOWN" : "RANGE (no break of structure yet)"
-    string cp_s = st == 1 ? " | control point " + str.tostring(cp, format.mintick) + " (a close below ends it)" : st == -1 ? " | control point " + str.tostring(cp, format.mintick) + " (a close above ends it)" : ""
+    string cp_s = st == 1 ? " | control point " + str.tostring(cp, format.mintick) + (cons ? " (a close below turns it DOWN)" : " (a close below ends it)") : st == -1 ? " | control point " + str.tostring(cp, format.mintick) + (cons ? " (a close above turns it UP)" : " (a close above ends it)") : ""
+    // consolidation and range: both prices that decide the next direction (Jay). A stalled downtrend resumes on any trade
+    // below the last swing low (no close needed, as trend_pack's new_lo); a range breaks on a close past either swing
+    if cons and st == -1 and not na(sl1)
+        cp_s += " | a trade below " + str.tostring(sl1, format.mintick) + " resumes DOWN"
+    if cons and st == 1 and not na(sh1)
+        cp_s += " | a trade above " + str.tostring(sh1, format.mintick) + " resumes UP"
+    if st == 0 and not na(sh1) and not na(sl1)
+        cp_s := " | a close above " + str.tostring(sh1, format.mintick) + " turns it UP | a close below " + str.tostring(sl1, format.mintick) + " turns it DOWN"
     string piv = (na(sh2) or na(sl2)) ? "" : " | highs " + str.tostring(sh1, format.mintick) + (sh1 > sh2 ? " > " : " < ") + str.tostring(sh2, format.mintick) + " | lows " + str.tostring(sl1, format.mintick) + (sl1 > sl2 ? " > " : " < ") + str.tostring(sl2, format.mintick)
     nm + " TREND: " + st_s + cp_s + piv
 

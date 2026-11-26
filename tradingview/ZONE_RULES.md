@@ -28,8 +28,8 @@ Read only from where candles sit relative to each other, tested against every zo
 - Fresh and once-touched zones are drawn (dashed when not a target). A zone price has come back to twice or more is
   removed: by then it holds about as often as a coin flip (overlap_dotted_test.py: 1st touch +0.19 to +0.21R, 2nd
   +0.11 to +0.15R, 3rd and later +0.05 to +0.11R).
-- Except when at least half of it sits inside a fresh zone of the other timeframe shown on the chart: zones stacked
-  across timeframes are extra confluence (Jay) and stay.
+- Except when it overlaps, even slightly, an active zone of the other timeframe shown on the chart: zones stacked across
+  timeframes are extra confluence and any overlap is significant (Jay).
 - Targets and the Touch / Zone / Exit entries are unchanged.
 
 ## 1. A zone is leg in, base, leg out

@@ -972,8 +972,8 @@ dup_lower(int slot, bool is_supply, box b, bool need_full) =>
 // Draw the nearest show_n zones on this side in full, the rest faint (Show All Valid Zones). White outline on the closest one if asked.
 // With use_filter, a zone is eligible only if it overlaps one of the anchor boxes (the visible chart timeframe zones).
 // Returns the boxes that ended up visible.
-// True when at least half of the box sits inside a fresh (untouched) zone of the same side on the other timeframe shown
-// on this chart (the chart's own and the one above): stacked zones are extra confluence
+// True when the box overlaps at all (Jay: the slightest overlap is significant) an active zone (touched under twice) of the
+// same side on the other timeframe shown on this chart (the chart's own and the one above): stacked zones are confluence
 stacked(int slot, bool is_supply, box b) =>
     bool hit = false
     for s2 = 0 to 2
@@ -983,8 +983,7 @@ stacked(int slot, bool is_supply, box b) =>
             if oa.size() > 0
                 for q = 0 to oa.size() - 1
                     Zone oz = oa.get(q)
-                    float ov = math.min(oz.b.get_top(), b.get_top()) - math.max(oz.b.get_bottom(), b.get_bottom())
-                    if oz.touches == 0 and ov >= 0.5 * (b.get_top() - b.get_bottom())
+                    if oz.touches < 2 and oz.b.get_top() >= b.get_bottom() and oz.b.get_bottom() <= b.get_top()
                         hit := true
                         break
         if hit

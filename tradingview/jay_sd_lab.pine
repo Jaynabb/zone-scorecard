@@ -290,7 +290,9 @@ detect(bool is_supply, int k, float yard) =>
                 r_hi := na(r_hi) ? math.max(open[q], close[q]) : math.max(r_hi, math.max(open[q], close[q]))
             float bl = math.abs(close[k + 1] - open[k + 1])
             bool same_way = is_supply ? close[k + 1] < r_lo : close[k + 1] > r_hi
-            last_moves := same_way and bl >= 0.45 * (high[k + 1] - low[k + 1]) and bl > 1.5 * rest.median()
+            // ... unless the move out candle is over twice its size: then the real move starts there and this candle is
+            // still part of the pause (BTC 5M 19:05 under the 19:10 leg out, Jay's 60324-60481 demand)
+            last_moves := same_way and bl >= 0.45 * (high[k + 1] - low[k + 1]) and bl > 1.5 * rest.median() and math.abs(close[k] - open[k]) <= 2 * bl
         bool beyond = (is_supply ? close[k] < b_lo : close[k] > b_hi) and not last_moves
         bool first_brk = na(close[first + 1]) ? false : is_supply ? close[first] < low[first + 1] : close[first] > high[first + 1]
         if beyond and not first_brk and pause

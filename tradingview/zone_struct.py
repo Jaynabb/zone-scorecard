@@ -58,7 +58,9 @@ def zones(df, max_base=12, dep_bars=8):
                 lst = b[-1]
                 rest = b[:-1]
                 same_way = c[lst] < blo[rest].min() if sup else c[lst] > bhi[rest].max()
-                if same_way and body[lst] >= 0.45 * rng[lst] and body[lst] > 1.5 * np.median(body[rest]): continue
+                # ... unless the move out candle is over twice its size: then the real move starts there and the
+                # last candle is still part of the pause (BTC 5M 19:05 under the 19:10 leg out)
+                if same_way and body[lst] >= 0.45 * rng[lst] and body[lst] > 1.5 * np.median(body[rest]) and body[i] <= 2 * body[lst]: continue
             # the move out closes beyond the base's bodies
             if not (c[i] < blo[b].min() if sup else c[i] > bhi[b].max()): continue
             # the first base candle is not itself a breakout in the move out's direction (then it is part of the move)

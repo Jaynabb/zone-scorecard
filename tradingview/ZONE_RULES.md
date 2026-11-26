@@ -14,7 +14,7 @@ Read only from where candles sit relative to each other, tested against every zo
   (side by side).
 - **Move in:** the walk stops at a travelling candle: body most of its range (45% or more) and over 1.5x the base's
   median body. The candle right before the move out is also the move if it travels that way and closes past the rest
-  of the base.
+  of the base, unless the move out candle is over twice its size (then the move starts there: BTC 5M 19:05 / 19:10).
 - **Turn:** the base starts at the candle with the most extreme body, or an earlier one holding the extreme wick.
 - **Part of the move:** the first base candle must not itself break out in the move out's direction (BTC 5M 19:25).
 - **Pause:** the base holds a candle whose body is under half its range (no zone at a V top of travelling candles).

@@ -110,7 +110,7 @@ color label_color = input.color(color.white, 'Text Color', group=visual_group)
 bool show_zigzag = input.bool(false, 'Show Zig Zag (chart timeframe)', group=visual_group)
 bool show_trend = input.bool(true, 'Show Trend Readout', group=visual_group, tooltip='A box in the top right corner with the trend state of the High timeframe (top, for context), the Trend Timeframe (the Mid timeframe, scored) and the Low timeframe, read from the zig zag swings with the 3 segment rule: higher highs and higher lows is UP, lower highs and lower lows is DOWN, anything else is RANGE. The control point is the last higher low (up) or lower high (down); a close through it ends the trend.')
 bool show_tlines = input.bool(true, 'Trend Change Lines', group=visual_group, tooltip='A line across the chart with a price tag on the price scale at every price that changes the trend of the three timeframes of the Trading Style (High, Mid and Low), as in the trend readout: green turns or resumes it UP, red turns or resumes it DOWN. UP or DOWN: the control point. Consolidation: the control point and the last swing that resumes the old trend. Range: the swing high and the swing low.')
-bool show_dhl = input.bool(true, 'Daily Highs And Lows', group=visual_group, inline='dhl', tooltip='On intraday charts, a line at the high and the low of each of the last few days, starting at the candle that made it. Solid while no later candle has traded past it; once one does, the line stops at that candle and turns dotted (the high or low was taken). Days follow the symbol\'s session (midnight UTC on crypto).')
+bool show_dhl = input.bool(true, 'Daily Highs And Lows', group=visual_group, inline='dhl', tooltip='On intraday charts, a line at the high and the low of each of the last few days, starting at the candle that made it. Every line is named at its right end. Solid while no later candle has traded past it; once one does, it turns dotted and is marked (taken). Yesterday\'s high and low run across the whole chart; older days stop at the candle that took them. Days follow the symbol\'s session (midnight UTC on crypto).')
 int dhl_days = input.int(5, 'Days', minval=1, maxval=20, group=visual_group, inline='dhl')
 bool show_fib = input.bool(true, 'Show High Timeframe Fib Range', group=visual_group, tooltip='Draws the range the Range score uses: a fib on the High timeframe (the highest of the three, set by the trading style), zone to zone: from the near edge of the High timeframe supply the last swing high came out of to the near edge of the High timeframe demand the last swing low came out of. An end with no such zone uses the swing price itself. Lines at 0, 25, 50, 75 and 100%. Demand in the bottom 25% scores 2 and below 75% scores 1; supply in the top 25% scores 2 and above 25% scores 1.')
 bool trend_auto = input.bool(true, 'Trend Readout Uses The Mid Timeframe', group=visual_group, tooltip='On: the readout scores the trend of the style\'s Mid timeframe. Off: it uses the Trend Timeframe below.')
@@ -562,7 +562,7 @@ mark_target(int slot, bool is_supply, Zone z, string tag, string extra, string s
     box b = z.b
     float mid = (b.get_top() + b.get_bottom()) / 2
     // just outside the box's right end, extending into the right margin. Green when the trade is a go
-    label l = label.new(bar_index + 6, mid, zone_text(slot, is_supply, z, tag, extra, status), xloc=xloc.bar_index, style=label.style_label_left, color=go ? go_color : highlight_color, textcolor=color.black, size=size.small)
+    label l = label.new(bar_index + 6, mid, zone_text(slot, is_supply, z, tag, extra, status), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(go ? go_color : highlight_color, 35), textcolor=color.black, size=size.small)
     tgt_labels.push(l)
 
 // When the list is full, forget the zone farthest from price: the zones near price are the ones in play, whether fresh,
@@ -1588,7 +1588,7 @@ entry_hint(Zone z, bool is_supply, int et, int pur, int s_trend) =>
     string tf = tf_name(slot_tf(z.slot))
     string stop = "stop just past " + str.tostring(far, format.mintick)
     et == 0 ? "HOW: no trade here. Zones under 1 hour are one and done and this one has had its touch; it is removed when price comes back." :
-     et == 1 ? "HOW (touch entry, fresh zone, purity 4): set a " + side + " limit at " + str.tostring(near, format.mintick) + ", " + stop + ". It fills the moment price comes back. Only take it with the trend and the EMA signal with the zone." :
+     et == 1 ? "HOW (touch entry, fresh zone, purity 4): set a " + side + " limit at " + str.tostring(near, format.mintick) + ", " + stop + ". It fills the moment price comes back. Only take it with the trend and the EMA signal with the zone, or counter trend under 1 hour with the EMA signal with the zone (then hold for the target zone: most of these lose, the edge is in the ones that run)." :
      et == 2 ? "HOW (zone entry, touched once under half way, with the trend): no limit order. Wait for a " + tf + " candle to close inside the zone, then " + side + " inside it (limit or market), " + stop + ". No close inside, no trade." :
      "HOW (exit entry, purity " + str.tostring(pur) + (s_trend == 0 ? ", counter trend" : "") + "): do not " + side + " the touch. Let price go into the zone and turn, then " + side + " when a " + tf + " candle closes back " + (is_supply ? "below " : "above ") + str.tostring(near, format.mintick) + ", " + stop + "."
 
@@ -1832,7 +1832,11 @@ score_zone(Zone z, bool is_supply, float r_top, float r_btm, box opp, string opp
 // zone. Backtest on the indicator's own zones (lab_backtest.py, 6 symbols, 4 styles): +0.19R / +0.22R / +0.34R per trade
 // on Day / Swing / Longer Swing against +0.13R / +0.12R / +0.18R for the score rule. Zone and Exit entries keep the score rule
 entry_state(Zone z, int total, int ema_n, int slot, int et, int s_trend) =>
-    bool valid = et == 1 ? s_trend == 4 : total >= go_min
+    // counter trend touch under 1 hour (lab_counter_trend.py, the indicator's own zones on 6 symbols): against the Mid
+    // trend with the EMA signal with the zone, +0.54R per trade to the target zone over 709 trades (21% win, hold for
+    // the target: a fixed 2R gave +0.06R); with the EMA against it lost. Needs the score a with-trend setup would need
+    bool ct = et == 1 and s_trend == 0 and timeframe.in_seconds(slot_tf(slot)) < 3600 and total >= go_min - 4
+    bool valid = et == 1 ? (s_trend == 4 or ct) : total >= go_min
     string tf = tf_name(slot_tf(slot))
     // the gap-away entry is taken right after the gap: it is live for the first two candles of the zone's timeframe after
     // the zone is confirmed. Later, with price long gone, the zone waits for its retest like any other
@@ -1846,9 +1850,9 @@ entry_state(Zone z, int total, int ema_n, int slot, int et, int s_trend) =>
     bool ema_ok = et == 1 ? ema_n == 1 : not ema_need or ema_n == 1
     bool go = valid and timing and ema_ok
     string why = et == 2 ? "zone entry, a " + tf + " candle closed inside" : et == 3 ? "exit entry, a " + tf + " candle closed back out" :
-         z.inside ? "touch entry, retest now" : "gap away, no retest needed"
+         z.inside ? (ct ? "COUNTER TREND touch entry: hold for the target zone, no 2R exit" : "touch entry, retest now") : "gap away, no retest needed"
     string wait = et == 1 ? "WAIT FOR RETEST (touch entry)" : et == 2 ? (z.inside ? "WAIT FOR A " + tf + " CLOSE INSIDE (zone entry)" : "WAIT FOR PRICE (zone entry)") : (z.inside ? "WAIT FOR A " + tf + " CLOSE BACK OUT (exit entry)" : "WAIT FOR PRICE TO GO IN AND TURN (exit entry)")
-    string st = et == 0 ? "NO (one and done: this " + tf + " zone has had its touch)" : late and not gap_live ? "NO (late: a " + tf + " candle already closed inside the zone)" : not valid ? (et == 1 ? "NO (touch entry needs the " + tf_name(TF1) + " trend with the zone)" : "NO (score under " + str.tostring(go_min) + ")") : not timing ? wait : not ema_ok ? "WAIT FOR EMA (" + why + ", EMA not with the zone)" : "GO (" + why + ")"
+    string st = et == 0 ? "NO (one and done: this " + tf + " zone has had its touch)" : late and not gap_live ? "NO (late: a " + tf + " candle already closed inside the zone)" : not valid ? (et == 1 ? (s_trend == 0 and timeframe.in_seconds(slot_tf(slot)) < 3600 ? "NO (counter trend touch needs score " + str.tostring(go_min - 4) + ")" : "NO (touch entry needs the " + tf_name(TF1) + " trend with the zone)") : "NO (score under " + str.tostring(go_min) + ")") : not timing ? wait : not ema_ok ? "WAIT FOR EMA (" + why + ", EMA not with the zone)" : "GO (" + why + ")"
     [go, st]
 
 score_line(int total, int s_range, int s_time, int s_trend, int s_move, int s_os, int s_pur, int s_rrr, float rrr, float ratio, float pos, string opp_nm, float r_top, float r_btm, string r_top_nm, string r_btm_nm, bool split) =>
@@ -2093,11 +2097,18 @@ if barstate.islast
         dhl_labels.pop().delete()
     if show_dhl and timeframe.isintraday and dh_px.size() > 0
         int t_end = time + 5 * timeframe.in_seconds() * 1000
-        for k = 0 to dh_px.size() - 1
+        int last = dh_px.size() - 1
+        for k = 0 to last
             for side = 0 to 1
                 float v = side == 0 ? dh_px.get(k) : dl_px.get(k)
                 int t0 = side == 0 ? dh_t.get(k) : dl_t.get(k)
                 int hit = side == 0 ? dh_hit.get(k) : dl_hit.get(k)
+                // yesterday's high and low run across the whole chart, taken or not; older days stop where they were taken
+                bool yday = k == last
+                int t1 = na(hit) or yday ? t_end : hit
                 color col = side == 0 ? color.new(#FFA94D, 10) : color.new(#4DABF7, 10)
-                dhl_lines.push(line.new(t0, v, na(hit) ? t_end : hit, v, xloc=xloc.bar_time, color=na(hit) ? col : color.new(col, 45), width=na(hit) ? 2 : 1, style=na(hit) ? line.style_solid : line.style_dotted))
-                dhl_labels.push(label.new(t0, v, dhl_nm.get(k) + (side == 0 ? " HIGH " : " LOW ") + str.tostring(v, format.mintick), xloc=xloc.bar_time, style=side == 0 ? label.style_label_lower_left : label.style_label_upper_left, color=color.new(color.white, 100), textcolor=na(hit) ? col : color.new(col, 45), size=size.small))
+                color lc = na(hit) ? col : color.new(col, 45)
+                dhl_lines.push(line.new(t0, v, t1, v, xloc=xloc.bar_time, extend=yday ? extend.both : extend.none, color=lc, width=na(hit) ? 2 : 1, style=na(hit) ? line.style_solid : line.style_dotted))
+                // the name sits under the line at its right end (the trend change names sit above), text running left
+                string nm = (yday ? "YESTERDAY" : dhl_nm.get(k)) + (side == 0 ? " HIGH " : " LOW ") + str.tostring(v, format.mintick) + (na(hit) ? "" : " (taken)")
+                dhl_labels.push(label.new(t1, v, nm, xloc=xloc.bar_time, style=label.style_label_upper_right, color=color.new(color.black, 30), textcolor=lc, size=size.small))

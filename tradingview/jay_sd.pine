@@ -109,7 +109,7 @@ int target_tr = input.int(40, 'Target Zone Fill Transparency', minval=0, maxval=
 color label_color = input.color(color.white, 'Text Color', group=visual_group)
 bool show_zigzag = input.bool(false, 'Show Zig Zag (chart timeframe)', group=visual_group)
 bool show_trend = input.bool(true, 'Show Trend Readout', group=visual_group, tooltip='A box in the top right corner with the trend state of the High timeframe (top, for context), the Trend Timeframe (the Mid timeframe, scored) and the Low timeframe, read from the zig zag swings with the 3 segment rule: higher highs and higher lows is UP, lower highs and lower lows is DOWN, anything else is RANGE. The control point is the last higher low (up) or lower high (down); a close through it ends the trend.')
-bool show_tlines = input.bool(true, 'Trend Change Lines', group=visual_group, tooltip='A line across the chart with a price tag on the price scale at every price that changes the trend of the three timeframes of the Trading Style (High, Mid and Low), as in the trend readout: green turns or resumes it UP, red turns or resumes it DOWN. UP or DOWN: the control point. Consolidation: the control point and the last swing that resumes the old trend. Range: the swing high and the swing low.')
+bool show_tlines = input.bool(true, 'Trend Change Lines', group=visual_group, tooltip='A line across the chart with a price tag on the price scale at every price that changes the trend of the three timeframes of the Trading Style (High, Mid and Low), as in the trend readout (plus the chart timeframe when it is none of the three, such as a 2M chart): green turns or resumes it UP, red turns or resumes it DOWN. UP or DOWN: the control point. Consolidation: the control point and the last swing that resumes the old trend. Range: the swing high and the swing low.')
 bool show_dhl = input.bool(true, 'Daily Highs And Lows', group=visual_group, inline='dhl', tooltip='On every timeframe, a line at the high and the low of each of the last few days, starting at the candle that made it. Every line runs across the whole chart and is named with its date at the right end; today\'s (still forming) is dashed. Solid while no later candle has traded past it; once one does, it turns dotted and is marked (taken). Today\'s and yesterday\'s levels are also tagged on the price scale. Days follow the symbol\'s session (midnight UTC on crypto).')
 int dhl_days = input.int(5, 'Days', minval=1, maxval=20, group=visual_group, inline='dhl')
 bool show_fib = input.bool(true, 'Show High Timeframe Fib Range', group=visual_group, tooltip='Draws the range the Range score uses: a fib on the High timeframe (the highest of the three, set by the trading style), zone to zone: from the near edge of the High timeframe supply the last swing high came out of to the near edge of the High timeframe demand the last swing low came out of. An end with no such zone uses the swing price itself. Lines at 0, 25, 50, 75 and 100%. Demand in the bottom 25% scores 2 and below 75% scores 1; supply in the top 25% scores 2 and above 25% scores 1.')
@@ -121,6 +121,7 @@ color zigzag_color = input.color(color.gray, 'ZigZag Color', group=visual_group)
 bool show_zone_info = input.bool(false, 'Zone Facts On Every Box', group=visual_group, tooltip='Prints price range, base candle count, base date and origin (own base, gap refined, or read from the timeframe below) inside every drawn box. For checking a zone against the rules.')
 bool label_targets_only = input.bool(true, 'Label Only The Target Zones', group=visual_group, tooltip='Only the white outlined zones (the nearest on each side) get a label: timeframe, side, price range and the word TARGET, placed in the margin right of the last candle. Other boxes stay unlabeled. Turn off to also print timeframe and side inside every box.')
 // added last so earlier inputs keep their ids and existing chart settings stay put
+int label_width = input.int(45, 'Trade Label Width (characters)', minval=20, maxval=200, group=visual_group, tooltip='The target labels wrap their lines at this many characters, so the white trade box stays narrow. Raise it for a wider, shorter box.')
 bool show_hint = input.bool(true, 'Show How To Take The Trade', group=visual_group, tooltip="Adds a HOW line to each target label: which of the course's three entries the zone calls for and the steps to take it. TOUCH (purity 4, fresh zone): limit order at the near edge. ZONE (purity 2, with the Mid trend): wait for a candle to close inside the zone, then enter inside it. EXIT (purity 0, or counter trend): let price go in and turn, enter when a candle closes back out. Stop past the far edge in all three.")
 int scalp_min = input.int(16, 'Valid Setup Score When Low TF Under 1 Hour', minval=0, maxval=20, group=scan_group, tooltip='Used instead of Valid Setup Score when the Low timeframe is under 1 hour (Scalping). With One And Done on, every tradable zone there is fresh and scores the full 4 for purity, so purity no longer separates setups; the higher bar makes the other checks earn it.')
 bool show_all = input.bool(true, 'Show All Valid Zones', group=visual_group, tooltip='Every zone price has not closed through stays on the chart. The nearest ones per side are drawn in full (Show Nearest Zones Per Side); the rest are drawn as a dashed outline only (green demand, red supply), including zones past their touch limit (One And Done), which are never targets. So when price comes back to old supply or demand it is already marked.')
@@ -557,12 +558,28 @@ zone_text(int slot, bool is_supply, Zone z, string tag, string extra, string sta
     string facts = "base " + str.tostring(z.base_n) + " | touches " + str.tostring(z.touches) + (z.touches > 0 ? " (" + str.tostring(math.round(z.depth * 100)) + "% deep)" : "") + " | OS " + (z.os ? "yes" : "no") + (z.gap ? " | gap refined" : "") + (z.via_lower ? " | base read on " + tf_name(slot == 2 ? TF1 : TF0) : "")
     nm + (is_supply ? " SUPPLY" : " DEMAND") + " " + str.tostring(b.get_bottom(), format.mintick) + " - " + str.tostring(b.get_top(), format.mintick) + "\nTARGET" + tag + (status == "" ? "" : " | " + status) + "\n" + facts + (extra != "" ? "\n" + extra : "")
 
+// Wraps every line of a label at word breaks so no line runs past w characters (keeps the target label narrow)
+wrap_text(string s, int w) =>
+    string out = ""
+    array<string> paras = str.split(s, "\n")
+    for [pi, p] in paras
+        string ln = ""
+        for wd in str.split(p, " ")
+            if str.length(ln) > 0 and str.length(ln) + 1 + str.length(wd) > w
+                out += ln + "\n"
+                ln := wd
+            else
+                ln := str.length(ln) > 0 ? ln + " " + wd : wd
+        out += ln + (pi < paras.size() - 1 ? "\n" : "")
+    // no line starts or ends on a bare separator
+    str.replace_all(str.replace_all(out, " |\n", "\n"), "\n| ", "\n")
+
 // Puts the target label in the empty space to the right of the last candle, where no candle can cover it.
 mark_target(int slot, bool is_supply, Zone z, string tag, string extra, string status, bool go) =>
     box b = z.b
     float mid = (b.get_top() + b.get_bottom()) / 2
     // just outside the box's right end, extending into the right margin. Green when the trade is a go
-    label l = label.new(bar_index + 6, mid, zone_text(slot, is_supply, z, tag, extra, status), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(go ? go_color : highlight_color, 35), textcolor=color.black, size=size.small)
+    label l = label.new(bar_index + 6, mid, wrap_text(zone_text(slot, is_supply, z, tag, extra, status), label_width), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(go ? go_color : highlight_color, 35), textcolor=color.black, size=size.small)
     tgt_labels.push(l)
 
 // When the list is full, forget the zone farthest from price: the zones near price are the ones in play, whether fresh,
@@ -1693,6 +1710,9 @@ tl_levels(int st, float cp, float sh1, float sl1, bool cons) =>
 [tlm_up, tlm_dn] = tl_levels(t_st, t_cp, t_sh1, t_sl1, t_cons)
 [tll_up, tll_dn] = tl_levels(l_st, l_cp, l_sh1, l_sl1, l_cons)
 bool tl_low_own = timeframe.in_seconds(trend_tf) != timeframe.in_seconds(TF0)
+[tlc_up, tlc_dn] = tl_levels(c_tst, c_tcp, c_tsh1, c_tsl1, c_tcons)
+// the chart timeframe gets its own pair when it is none of the three (a 2M chart on Scalping), like its trend box row
+bool tl_chart_own = show_c
 color tl_col_up = color.new(#2ECC71, 20)
 color tl_col_dn = color.new(#FF5252, 20)
 plot(show_tlines ? tlh_up : na, 'High TF UP price', color=tl_col_up, linewidth=1, trackprice=true, show_last=1, display=display.pane + display.price_scale)
@@ -1701,17 +1721,19 @@ plot(show_tlines ? tlm_up : na, 'Mid TF UP price', color=tl_col_up, linewidth=2,
 plot(show_tlines ? tlm_dn : na, 'Mid TF DOWN price', color=tl_col_dn, linewidth=2, trackprice=true, show_last=1, display=display.pane + display.price_scale)
 plot(show_tlines and tl_low_own ? tll_up : na, 'Low TF UP price', color=tl_col_up, linewidth=1, trackprice=true, show_last=1, display=display.pane + display.price_scale)
 plot(show_tlines and tl_low_own ? tll_dn : na, 'Low TF DOWN price', color=tl_col_dn, linewidth=1, trackprice=true, show_last=1, display=display.pane + display.price_scale)
+plot(show_tlines and tl_chart_own ? tlc_up : na, 'Chart TF UP price', color=tl_col_up, linewidth=1, trackprice=true, show_last=1, display=display.pane + display.price_scale)
+plot(show_tlines and tl_chart_own ? tlc_dn : na, 'Chart TF DOWN price', color=tl_col_dn, linewidth=1, trackprice=true, show_last=1, display=display.pane + display.price_scale)
 // names on the lines (plot titles cannot carry the timeframe), right of the last candle
 var array<label> tl_labels = array.new<label>()
 if barstate.islast
     while tl_labels.size() > 0
         tl_labels.pop().delete()
     if show_tlines
-        array<float> tl_px = array.from(tlh_up, tlh_dn, tlm_up, tlm_dn, tl_low_own ? tll_up : na, tl_low_own ? tll_dn : na)
-        array<string> tl_nm = array.from(tf_name(TF2) + " UP", tf_name(TF2) + " DOWN", tf_name(trend_tf) + " UP", tf_name(trend_tf) + " DOWN", tf_name(TF0) + " UP", tf_name(TF0) + " DOWN")
+        array<float> tl_px = array.from(tlh_up, tlh_dn, tlm_up, tlm_dn, tl_low_own ? tll_up : na, tl_low_own ? tll_dn : na, tl_chart_own ? tlc_up : na, tl_chart_own ? tlc_dn : na)
+        array<string> tl_nm = array.from(tf_name(TF2) + " UP", tf_name(TF2) + " DOWN", tf_name(trend_tf) + " UP", tf_name(trend_tf) + " DOWN", tf_name(TF0) + " UP", tf_name(TF0) + " DOWN", tf_name(timeframe.period) + " UP", tf_name(timeframe.period) + " DOWN")
         // every line gets a name; lines on the same price share one label ("1H UP / 30M UP 61509") so none hides another.
         // The text ends at the zones' right edge and runs left, so the price scale never cuts it off
-        for k = 0 to 5
+        for k = 0 to 7
             float v = tl_px.get(k)
             bool first = true
             if not na(v) and k > 0
@@ -1721,8 +1743,8 @@ if barstate.islast
                         break
             if not na(v) and first
                 string txt = tl_nm.get(k)
-                if k < 5
-                    for q = k + 1 to 5
+                if k < 7
+                    for q = k + 1 to 7
                         if tl_px.get(q) == v
                             txt += " / " + tl_nm.get(q)
                 tl_labels.push(label.new(bar_index + 5, v, txt + " " + str.tostring(v, format.mintick), style=label.style_label_lower_right, color=color.new(color.black, 30), textcolor=k % 2 == 0 ? tl_col_up : tl_col_dn, size=size.small))

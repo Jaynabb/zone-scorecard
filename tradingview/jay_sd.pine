@@ -575,7 +575,7 @@ wrap_text(string s, int w) =>
 
 // Puts the target label in the empty space to the right of the last candle, where no candle can cover it.
 // GAP AWAY (Jay): the impulse candle's body opens past the zone's near edge by any amount, leaving an empty space
-// between the zone and the candle. Shown as a purple dotted box in that space and an orange tag on the trade box; the
+// between the zone and the candle. Shown as an orange dotted box in that space and an orange tag on the trade box; the
 // entry rules do not change (gap_away_entry_backtest.py: entering at once was breakeven, the retest +0.12R).
 // Each timeframe's candle opens, keyed by candle time, so a zone's impulse open can be looked up from its impulse time
 var map<int, float> io_0 = map.new<int, float>()
@@ -2186,7 +2186,7 @@ plot(show_dhl ? yd_hi : na, 'Yesterday high', color=color.new(#FFA94D, 10), trac
 plot(show_dhl ? yd_lo : na, 'Yesterday low', color=color.new(#4DABF7, 10), trackprice=false, show_last=1, display=display.price_scale)
 
 //-----------------------------------------------------------------------------
-// GAP AWAY MARKS: a purple dotted box in the empty space between each drawn zone and its impulse candle's open
+// GAP AWAY MARKS: an orange dotted box in the empty space between each drawn zone and its impulse candle's open
 //-----------------------------------------------------------------------------
 var array<box> gap_boxes = array.new<box>()
 if barstate.islast
@@ -2204,4 +2204,4 @@ if barstate.islast
                     if not na(gx)
                         float edge = is_sup ? z.b.get_bottom() : z.b.get_top()
                         int w_ms = timeframe.in_seconds(slot_tf(z.slot)) * 1000
-                        gap_boxes.push(box.new(z.it, math.max(gx, edge), z.it + w_ms, math.min(gx, edge), xloc=xloc.bar_time, border_color=color.new(#B266FF, 0), border_width=2, border_style=line.style_dotted, bgcolor=color.new(#B266FF, 80)))
+                        gap_boxes.push(box.new(z.it, math.max(gx, edge), z.it + w_ms, math.min(gx, edge), xloc=xloc.bar_time, border_color=color.new(#FF8C00, 0), border_width=2, border_style=line.style_dotted, bgcolor=color.new(#FF8C00, 80)))

@@ -122,7 +122,6 @@ bool show_zone_info = input.bool(false, 'Zone Facts On Every Box', group=visual_
 bool label_targets_only = input.bool(true, 'Label Only The Target Zones', group=visual_group, tooltip='Only the white outlined zones (the nearest on each side) get a label: timeframe, side, price range and the word TARGET, placed in the margin right of the last candle. Other boxes stay unlabeled. Turn off to also print timeframe and side inside every box.')
 // added last so earlier inputs keep their ids and existing chart settings stay put
 int label_width = input.int(45, 'Trade Label Width (characters)', minval=20, maxval=200, group=visual_group, tooltip='The target labels wrap their lines at this many characters, so the white trade box stays narrow. Raise it for a wider, shorter box.')
-bool show_hint = input.bool(true, 'Show How To Take The Trade', group=visual_group, tooltip="Adds a HOW line to each target label: which of the course's three entries the zone calls for and the steps to take it. TOUCH (purity 4, fresh zone): limit order at the near edge. ZONE (purity 2, with the Mid trend): wait for a candle to close inside the zone, then enter inside it. EXIT (purity 0, or counter trend): let price go in and turn, enter when a candle closes back out. Stop past the far edge in all three.")
 int scalp_min = input.int(16, 'Valid Setup Score When Low TF Under 1 Hour', minval=0, maxval=20, group=scan_group, tooltip='Used instead of Valid Setup Score when the Low timeframe is under 1 hour (Scalping). With One And Done on, every tradable zone there is fresh and scores the full 4 for purity, so purity no longer separates setups; the higher bar makes the other checks earn it.')
 bool show_all = input.bool(true, 'Show All Valid Zones', group=visual_group, tooltip='Every zone price has not closed through stays on the chart. The nearest ones per side are drawn in full (Show Nearest Zones Per Side); the rest are drawn as a dashed outline only (green demand, red supply), including zones past their touch limit (One And Done), which are never targets. So when price comes back to old supply or demand it is already marked.')
 float faint_reach = input.float(10.0, 'Faint Zones Within (x typical body)', minval=0.0, step=1.0, group=visual_group, tooltip='Show All Valid Zones draws a faint zone only when it is within this many typical candle bodies of its own timeframe from price (about 10 bodies: the Daily zones a few days of travel away, the Monthly zones a few months away). 0 = no limit. Faint zones of a timeframe below the chart timeframe are never drawn; the nearest zones and targets still are.')
@@ -575,12 +574,17 @@ wrap_text(string s, int w) =>
     str.replace_all(str.replace_all(out, " |\n", "\n"), "\n| ", "\n")
 
 // Puts the target label in the empty space to the right of the last candle, where no candle can cover it.
-mark_target(int slot, bool is_supply, Zone z, string tag, string extra, string status, bool go) =>
+mark_target(int slot, bool is_supply, Zone z, string tag, string extra, string status, bool go, int total) =>
     box b = z.b
     float mid = (b.get_top() + b.get_bottom()) / 2
     // just outside the box's right end, extending into the right margin. Green when the trade is a go
-    label l = label.new(bar_index + 6, mid, wrap_text(zone_text(slot, is_supply, z, tag, extra, status), label_width), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(go ? go_color : highlight_color, 35), textcolor=color.black, size=size.small)
+    // the details hang down from the zone's middle and the score sits on top of them in its own color: green at the
+    // GO line, yellow within 4 points of it, red below
+    label l = label.new(bar_index + 6, mid, wrap_text(zone_text(slot, is_supply, z, tag, extra, status), label_width), xloc=xloc.bar_index, style=label.style_label_upper_left, color=color.new(go ? go_color : highlight_color, 35), textcolor=color.black, size=size.small)
     tgt_labels.push(l)
+    if show_score
+        color sc = total >= go_min ? #2ECC71 : total >= go_min - 4 ? #F5C542 : #FF6B6B
+        tgt_labels.push(label.new(bar_index + 6, mid, "SCORE " + str.tostring(total) + "/20", xloc=xloc.bar_index, style=label.style_label_lower_left, color=color.new(sc, 0), textcolor=color.black, size=size.normal))
 
 // When the list is full, forget the zone farthest from price: the zones near price are the ones in play, whether fresh,
 // touched or past their touches, and a valid zone close to price must never be dropped for an old one far away
@@ -1878,7 +1882,7 @@ entry_state(Zone z, int total, int ema_n, int slot, int et, int s_trend) =>
     [go, st]
 
 score_line(int total, int s_range, int s_time, int s_trend, int s_move, int s_os, int s_pur, int s_rrr, float rrr, float ratio, float pos, string opp_nm, float r_top, float r_btm, string r_top_nm, string r_btm_nm, bool split) =>
-    "SCORE " + str.tostring(total) + "/20 | range " + (na(pos) ? "? (no " + tf_name(TF2) + " swings yet)" : str.tostring(s_range) + (show_zone_info ? " (" + str.tostring(math.round(pos * 100)) + "% of " + str.tostring(r_btm, format.mintick) + " " + r_btm_nm + " to " + str.tostring(r_top, format.mintick) + " " + r_top_nm + ")" : "")) + " | time " + str.tostring(s_time) + " | trend " + str.tostring(s_trend) + (split ? " (" + tf_name(TF0) + " pulling against " + tf_name(TF1) + ")" : "") + " | move " + str.tostring(s_move) + (na(ratio) ? "" : " (" + str.tostring(ratio, "#.#") + "x)") + " | OS " + str.tostring(s_os) + " | purity " + str.tostring(s_pur) + " | rrr " + str.tostring(s_rrr) + (na(rrr) ? " (no opposing zone)" : " (" + str.tostring(rrr, "#.#") + ":1" + (opp_nm == "" ? "" : " to " + opp_nm) + ")")
+    "range " + (na(pos) ? "? (no " + tf_name(TF2) + " swings yet)" : str.tostring(s_range) + (show_zone_info ? " (" + str.tostring(math.round(pos * 100)) + "% of " + str.tostring(r_btm, format.mintick) + " " + r_btm_nm + " to " + str.tostring(r_top, format.mintick) + " " + r_top_nm + ")" : "")) + " | time " + str.tostring(s_time) + " | trend " + str.tostring(s_trend) + (split ? " (" + tf_name(TF0) + " pulling against " + tf_name(TF1) + ")" : "") + " | move " + str.tostring(s_move) + (na(ratio) ? "" : " (" + str.tostring(ratio, "#.#") + "x)") + " | OS " + str.tostring(s_os) + " | purity " + str.tostring(s_pur) + " | rrr " + str.tostring(s_rrr) + (na(rrr) ? " (no opposing zone)" : " (" + str.tostring(rrr, "#.#") + ":1" + (opp_nm == "" ? "" : " to " + opp_nm) + ")")
 
 num(float x) =>
     na(x) ? "null" : str.tostring(x, "#.####")
@@ -1938,12 +1942,11 @@ if barstate.islast
         int s_typ_last = tgt_sup.touches == 0 ? 1 : entry_type(purity_of(tgt_sup, true), a3)
         [s_go, s_ent] = entry_state(tgt_sup, tot, s_en, tgt_sup_slot, s_typ, a3)
         [s_tr, s_trt, s_n, s_k1, s_ke, s_re] = trade_walk(tgt_sup, true, s_typ_last)
-        string s_how = show_hint and (s_tr == 0 or s_tr >= 3) ? "\n" + entry_hint(tgt_sup, true, s_typ, a6, a3) : ""
         trade_marks(true, s_tr, s_k1, s_ke, s_re)
         be_now := be_now or (s_tr == 2 and s_tr_prev == 1)
         exit_now := exit_now or (s_tr >= 3 and s_tr_prev >= 1 and s_tr_prev <= 2)
         s_tr_prev := s_tr
-        mark_target(tgt_sup_slot, true, tgt_sup, tgt_sup_tag, (show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, r_top, r_btm, r_top_nm, r_btm_nm, spl) + "\n" : "") + s_et + (s_trt != "" ? "\n" + s_trt : "") + s_how, s_ent, s_go)
+        mark_target(tgt_sup_slot, true, tgt_sup, tgt_sup_tag, (show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, r_top, r_btm, r_top_nm, r_btm_nm, spl) + "\n" : "") + s_et + (s_trt != "" ? "\n" + s_trt : ""), s_ent, s_go, tot)
         s_json := setup_json(tgt_sup, true, tgt_sup_slot, tgt_sup_tag, tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, s_go, s_ent, s_en)
     if not na(tgt_dem)
         box opp = na
@@ -1965,12 +1968,11 @@ if barstate.islast
         int d_typ_last = tgt_dem.touches == 0 ? 1 : entry_type(purity_of(tgt_dem, true), a3)
         [d_go, d_ent] = entry_state(tgt_dem, tot, d_en, tgt_dem_slot, d_typ, a3)
         [d_tr, d_trt, d_n, d_k1, d_ke, d_re] = trade_walk(tgt_dem, false, d_typ_last)
-        string d_how = show_hint and (d_tr == 0 or d_tr >= 3) ? "\n" + entry_hint(tgt_dem, false, d_typ, a6, a3) : ""
         trade_marks(false, d_tr, d_k1, d_ke, d_re)
         be_now := be_now or (d_tr == 2 and d_tr_prev == 1)
         exit_now := exit_now or (d_tr >= 3 and d_tr_prev >= 1 and d_tr_prev <= 2)
         d_tr_prev := d_tr
-        mark_target(tgt_dem_slot, false, tgt_dem, tgt_dem_tag, (show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, r_top, r_btm, r_top_nm, r_btm_nm, spl) + "\n" : "") + d_et + (d_trt != "" ? "\n" + d_trt : "") + d_how, d_ent, d_go)
+        mark_target(tgt_dem_slot, false, tgt_dem, tgt_dem_tag, (show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, r_top, r_btm, r_top_nm, r_btm_nm, spl) + "\n" : "") + d_et + (d_trt != "" ? "\n" + d_trt : ""), d_ent, d_go, tot)
         d_json := setup_json(tgt_dem, false, tgt_dem_slot, tgt_dem_tag, tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, d_go, d_ent, d_en)
     if not na(tgt_sup) and not na(tgt_dem)
         float s_edge = tgt_sup.b.get_bottom()

@@ -110,7 +110,7 @@ color label_color = input.color(color.white, 'Text Color', group=visual_group)
 bool show_zigzag = input.bool(false, 'Show Zig Zag (chart timeframe)', group=visual_group)
 bool show_trend = input.bool(true, 'Show Trend Readout', group=visual_group, tooltip='A box in the top right corner with the trend state of the High timeframe (top, for context), the Trend Timeframe (the Mid timeframe, scored) and the Low timeframe, read from the zig zag swings with the 3 segment rule: higher highs and higher lows is UP, lower highs and lower lows is DOWN, anything else is RANGE. The control point is the last higher low (up) or lower high (down); a close through it ends the trend.')
 bool show_tlines = input.bool(true, 'Trend Change Lines', group=visual_group, tooltip='A line across the chart with a price tag on the price scale at every price that changes the trend of the three timeframes of the Trading Style (High, Mid and Low), as in the trend readout: green turns or resumes it UP, red turns or resumes it DOWN. UP or DOWN: the control point. Consolidation: the control point and the last swing that resumes the old trend. Range: the swing high and the swing low.')
-bool show_dhl = input.bool(true, 'Daily Highs And Lows', group=visual_group, inline='dhl', tooltip='On every timeframe, a line at the high and the low of each of the last few days, starting at the candle that made it. Every line is named at its right end. Solid while no later candle has traded past it; once one does, it turns dotted and is marked (taken). Yesterday\'s high and low run across the whole chart; older days stop at the candle that took them. Days follow the symbol\'s session (midnight UTC on crypto).')
+bool show_dhl = input.bool(true, 'Daily Highs And Lows', group=visual_group, inline='dhl', tooltip='On every timeframe, a line at the high and the low of each of the last few days, starting at the candle that made it. Every line runs across the whole chart and is named with its date at the right end; today\'s (still forming) is dashed. Solid while no later candle has traded past it; once one does, it turns dotted and is marked (taken). Today\'s and yesterday\'s levels are also tagged on the price scale. Days follow the symbol\'s session (midnight UTC on crypto).')
 int dhl_days = input.int(5, 'Days', minval=1, maxval=20, group=visual_group, inline='dhl')
 bool show_fib = input.bool(true, 'Show High Timeframe Fib Range', group=visual_group, tooltip='Draws the range the Range score uses: a fib on the High timeframe (the highest of the three, set by the trading style), zone to zone: from the near edge of the High timeframe supply the last swing high came out of to the near edge of the High timeframe demand the last swing low came out of. An end with no such zone uses the swing price itself. Lines at 0, 25, 50, 75 and 100%. Demand in the bottom 25% scores 2 and below 75% scores 1; supply in the top 25% scores 2 and above 25% scores 1.')
 bool trend_auto = input.bool(true, 'Trend Readout Uses The Mid Timeframe', group=visual_group, tooltip='On: the readout scores the trend of the style\'s Mid timeframe. Off: it uses the Trend Timeframe below.')
@@ -2090,9 +2090,9 @@ dhl_track(int n) =>
     if na(l_now) or low < l_now
         l_now := low
         l_now_t := time
-    [hp, lp, ht, lt, hh, lh, dd]
+    [hp, lp, ht, lt, hh, lh, dd, h_now, l_now, h_now_t, l_now_t, time_tradingday]
 bool dhl_from_d = timeframe.in_seconds() > 86400
-[dh_px, dl_px, dh_t, dl_t, dh_hit, dl_hit, dh_day] = request.security(syminfo.tickerid, dhl_from_d ? "D" : timeframe.period, dhl_track(dhl_days), lookahead=barmerge.lookahead_off)
+[dh_px, dl_px, dh_t, dl_t, dh_hit, dl_hit, dh_day, td_hi, td_lo, td_hi_t, td_lo_t, td_day] = request.security(syminfo.tickerid, dhl_from_d ? "D" : timeframe.period, dhl_track(dhl_days), lookahead=barmerge.lookahead_off)
 var array<line> dhl_lines = array.new<line>()
 var array<label> dhl_labels = array.new<label>()
 if barstate.islast
@@ -2100,20 +2100,35 @@ if barstate.islast
         dhl_lines.pop().delete()
     while dhl_labels.size() > 0
         dhl_labels.pop().delete()
-    if show_dhl and dh_px.size() > 0
+    if show_dhl and not na(td_hi)
         int t_end = time + 5 * timeframe.in_seconds() * 1000
         int last = dh_px.size() - 1
-        for k = 0 to last
+        // every day's high and low runs across the whole chart, dated at its right end by the price scale; today's is
+        // still forming. Solid while untouched, dotted once a later candle traded past it (taken)
+        for k = 0 to last + 1
             for side = 0 to 1
-                float v = side == 0 ? dh_px.get(k) : dl_px.get(k)
-                int t0 = side == 0 ? dh_t.get(k) : dl_t.get(k)
-                int hit = side == 0 ? dh_hit.get(k) : dl_hit.get(k)
-                // yesterday's high and low run across the whole chart, taken or not; older days stop where they were taken
-                bool yday = k == last
-                int t1 = na(hit) or yday ? t_end : hit
+                bool today = k == last + 1
+                float v = side == 0 ? td_hi : td_lo
+                int t0 = side == 0 ? td_hi_t : td_lo_t
+                int hit = na
+                int dt = td_day
+                if not today
+                    v := side == 0 ? dh_px.get(k) : dl_px.get(k)
+                    t0 := side == 0 ? dh_t.get(k) : dl_t.get(k)
+                    hit := side == 0 ? dh_hit.get(k) : dl_hit.get(k)
+                    dt := dh_day.get(k)
+                string day = str.format_time(dt, "EEE MMM d", "UTC")
+                string tag = today ? "TODAY " : k == last ? "YESTERDAY " : ""
                 color col = side == 0 ? color.new(#FFA94D, 10) : color.new(#4DABF7, 10)
                 color lc = na(hit) ? col : color.new(col, 45)
-                dhl_lines.push(line.new(t0, v, t1, v, xloc=xloc.bar_time, extend=yday ? extend.both : extend.none, color=lc, width=na(hit) ? 2 : 1, style=na(hit) ? line.style_solid : line.style_dotted))
+                dhl_lines.push(line.new(t0, v, t_end, v, xloc=xloc.bar_time, extend=extend.both, color=lc, width=na(hit) ? 2 : 1, style=today ? line.style_dashed : na(hit) ? line.style_solid : line.style_dotted))
                 // the name sits under the line at its right end (the trend change names sit above), text running left
-                string nm = (yday ? "YESTERDAY" : str.format_time(dh_day.get(k), "EEE d", "UTC")) + (side == 0 ? " HIGH " : " LOW ") + str.tostring(v, format.mintick) + (na(hit) ? "" : " (taken)")
-                dhl_labels.push(label.new(t1, v, nm, xloc=xloc.bar_time, style=label.style_label_upper_right, color=color.new(color.black, 30), textcolor=lc, size=size.small))
+                string nm = tag + day + (side == 0 ? " HIGH " : " LOW ") + str.tostring(v, format.mintick) + (na(hit) ? "" : " (taken)")
+                dhl_labels.push(label.new(t_end, v, nm, xloc=xloc.bar_time, style=label.style_label_upper_right, color=color.new(color.black, 30), textcolor=lc, size=size.small))
+// price scale tags for today's and yesterday's high and low
+float yd_hi = dh_px.size() > 0 ? dh_px.last() : na
+float yd_lo = dl_px.size() > 0 ? dl_px.last() : na
+plot(show_dhl ? td_hi : na, 'Today high', color=color.new(#FFA94D, 10), trackprice=false, show_last=1, display=display.price_scale)
+plot(show_dhl ? td_lo : na, 'Today low', color=color.new(#4DABF7, 10), trackprice=false, show_last=1, display=display.price_scale)
+plot(show_dhl ? yd_hi : na, 'Yesterday high', color=color.new(#FFA94D, 10), trackprice=false, show_last=1, display=display.price_scale)
+plot(show_dhl ? yd_lo : na, 'Yesterday low', color=color.new(#4DABF7, 10), trackprice=false, show_last=1, display=display.price_scale)

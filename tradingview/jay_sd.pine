@@ -574,7 +574,34 @@ wrap_text(string s, int w) =>
     str.replace_all(str.replace_all(out, " |\n", "\n"), "\n| ", "\n")
 
 // Puts the target label in the empty space to the right of the last candle, where no candle can cover it.
+// GAP AWAY (Jay): the impulse candle's body opens past the zone's near edge by any amount, leaving an empty space
+// between the zone and the candle. Shown as a purple dotted box in that space and an orange tag on the trade box; the
+// entry rules do not change (gap_away_entry_backtest.py: entering at once was breakeven, the retest +0.12R).
+// Each timeframe's candle opens, keyed by candle time, so a zone's impulse open can be looked up from its impulse time
+var map<int, float> io_0 = map.new<int, float>()
+var map<int, float> io_1 = map.new<int, float>()
+var map<int, float> io_2 = map.new<int, float>()
+var map<int, float> io_c = map.new<int, float>()
+put_open(map<int, float> m, int t, float o) =>
+    if not na(t) and not na(o) and not m.contains(t)
+        m.put(t, o)
+        if m.size() > 800
+            m.remove(m.keys().first())
+[io0_t, io0_o] = request.security(syminfo.tickerid, TF0, [time, open], lookahead=barmerge.lookahead_off)
+[io1_t, io1_o] = request.security(syminfo.tickerid, TF1, [time, open], lookahead=barmerge.lookahead_off)
+[io2_t, io2_o] = request.security(syminfo.tickerid, TF2, [time, open], lookahead=barmerge.lookahead_off)
+put_open(io_0, io0_t, io0_o)
+put_open(io_1, io1_t, io1_o)
+put_open(io_2, io2_t, io2_o)
+put_open(io_c, time, open)
+// the price the impulse opened at when it opened past the zone's near edge (na when it did not or is not known)
+gap_open(Zone z, bool is_supply) =>
+    map<int, float> m = z.slot == 0 ? io_0 : z.slot == 1 ? io_1 : z.slot == 2 ? io_2 : io_c
+    float o = na(z.it) ? na : m.get(z.it)
+    not na(o) and (is_supply ? o < z.b.get_bottom() : o > z.b.get_top()) ? o : na
+
 mark_target(int slot, bool is_supply, Zone z, string tag, string extra, string status, bool go, int total) =>
+    float gx = gap_open(z, is_supply)
     box b = z.b
     float mid = (b.get_top() + b.get_bottom()) / 2
     // just outside the box's right end, extending into the right margin. Green when the trade is a go
@@ -583,8 +610,9 @@ mark_target(int slot, bool is_supply, Zone z, string tag, string extra, string s
     label l = label.new(bar_index + 6, mid, wrap_text(zone_text(slot, is_supply, z, tag, extra, status), label_width), xloc=xloc.bar_index, style=label.style_label_upper_left, color=color.new(go ? go_color : highlight_color, 35), textcolor=color.black, size=size.small)
     tgt_labels.push(l)
     if show_score
-        color sc = total >= go_min ? #2ECC71 : total >= go_min - 4 ? #F5C542 : #FF6B6B
-        tgt_labels.push(label.new(bar_index + 6, mid, "SCORE " + str.tostring(total) + "/20", xloc=xloc.bar_index, style=label.style_label_lower_left, color=color.new(sc, 0), textcolor=color.black, size=size.normal))
+        color sc = not na(gx) ? #FF8C00 : total >= go_min ? #2ECC71 : total >= go_min - 4 ? #F5C542 : #FF6B6B
+        string gtx = na(gx) ? "" : "GAP AWAY " + str.tostring(math.abs(gx - (is_supply ? b.get_bottom() : b.get_top())), format.mintick) + " from the zone\n"
+        tgt_labels.push(label.new(bar_index + 6, mid, gtx + "SCORE " + str.tostring(total) + "/20", xloc=xloc.bar_index, style=label.style_label_lower_left, color=color.new(sc, 0), textcolor=color.black, size=size.normal))
 
 // When the list is full, forget the zone farthest from price: the zones near price are the ones in play, whether fresh,
 // touched or past their touches, and a valid zone close to price must never be dropped for an old one far away
@@ -2156,3 +2184,24 @@ plot(show_dhl ? td_hi : na, 'Today high', color=color.new(#FFA94D, 10), trackpri
 plot(show_dhl ? td_lo : na, 'Today low', color=color.new(#4DABF7, 10), trackprice=false, show_last=1, display=display.price_scale)
 plot(show_dhl ? yd_hi : na, 'Yesterday high', color=color.new(#FFA94D, 10), trackprice=false, show_last=1, display=display.price_scale)
 plot(show_dhl ? yd_lo : na, 'Yesterday low', color=color.new(#4DABF7, 10), trackprice=false, show_last=1, display=display.price_scale)
+
+//-----------------------------------------------------------------------------
+// GAP AWAY MARKS: a purple dotted box in the empty space between each drawn zone and its impulse candle's open
+//-----------------------------------------------------------------------------
+var array<box> gap_boxes = array.new<box>()
+if barstate.islast
+    while gap_boxes.size() > 0
+        gap_boxes.pop().delete()
+    for a = 0 to 7
+        array<Zone> za = a == 0 ? sup_d : a == 1 ? dem_d : a == 2 ? sup_w : a == 3 ? dem_w : a == 4 ? sup_m : a == 5 ? dem_m : a == 6 ? sup_c : dem_c
+        bool is_sup = a % 2 == 0
+        if za.size() > 0
+            for i = 0 to za.size() - 1
+                Zone z = za.get(i)
+                int di = drawn_b.indexof(z.b)
+                if di >= 0
+                    float gx = gap_open(z, is_sup)
+                    if not na(gx)
+                        float edge = is_sup ? z.b.get_bottom() : z.b.get_top()
+                        int w_ms = timeframe.in_seconds(slot_tf(z.slot)) * 1000
+                        gap_boxes.push(box.new(z.it, math.max(gx, edge), z.it + w_ms, math.min(gx, edge), xloc=xloc.bar_time, border_color=color.new(#B266FF, 0), border_width=2, border_style=line.style_dotted, bgcolor=color.new(#B266FF, 80)))

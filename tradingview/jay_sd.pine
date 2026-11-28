@@ -1782,19 +1782,24 @@ bool tl_low_own = timeframe.in_seconds(trend_tf) != timeframe.in_seconds(TF0)
 bool tl_chart_own = show_c
 color tl_col_up = color.new(#2ECC71, 20)
 color tl_col_dn = color.new(#FF5252, 20)
-plot(show_tlines ? tlh_up : na, 'High TF UP price', color=tl_col_up, linewidth=1, trackprice=true, show_last=1, display=display.pane + display.price_scale)
-plot(show_tlines ? tlh_dn : na, 'High TF DOWN price', color=tl_col_dn, linewidth=1, trackprice=true, show_last=1, display=display.pane + display.price_scale)
-plot(show_tlines ? tlm_up : na, 'Mid TF UP price', color=tl_col_up, linewidth=2, trackprice=true, show_last=1, display=display.pane + display.price_scale)
-plot(show_tlines ? tlm_dn : na, 'Mid TF DOWN price', color=tl_col_dn, linewidth=2, trackprice=true, show_last=1, display=display.pane + display.price_scale)
-plot(show_tlines and tl_low_own ? tll_up : na, 'Low TF UP price', color=tl_col_up, linewidth=1, trackprice=true, show_last=1, display=display.pane + display.price_scale)
-plot(show_tlines and tl_low_own ? tll_dn : na, 'Low TF DOWN price', color=tl_col_dn, linewidth=1, trackprice=true, show_last=1, display=display.pane + display.price_scale)
-plot(show_tlines and tl_chart_own ? tlc_up : na, 'Chart TF UP price', color=tl_col_up, linewidth=1, trackprice=true, show_last=1, display=display.pane + display.price_scale)
-plot(show_tlines and tl_chart_own ? tlc_dn : na, 'Chart TF DOWN price', color=tl_col_dn, linewidth=1, trackprice=true, show_last=1, display=display.pane + display.price_scale)
+plot(show_tlines ? tlh_up : na, 'High TF UP price', color=tl_col_up, linewidth=1, trackprice=false, show_last=1, display=display.pane + display.price_scale)
+plot(show_tlines ? tlh_dn : na, 'High TF DOWN price', color=tl_col_dn, linewidth=1, trackprice=false, show_last=1, display=display.pane + display.price_scale)
+plot(show_tlines ? tlm_up : na, 'Mid TF UP price', color=tl_col_up, linewidth=2, trackprice=false, show_last=1, display=display.pane + display.price_scale)
+plot(show_tlines ? tlm_dn : na, 'Mid TF DOWN price', color=tl_col_dn, linewidth=2, trackprice=false, show_last=1, display=display.pane + display.price_scale)
+plot(show_tlines and tl_low_own ? tll_up : na, 'Low TF UP price', color=tl_col_up, linewidth=1, trackprice=false, show_last=1, display=display.pane + display.price_scale)
+plot(show_tlines and tl_low_own ? tll_dn : na, 'Low TF DOWN price', color=tl_col_dn, linewidth=1, trackprice=false, show_last=1, display=display.pane + display.price_scale)
+plot(show_tlines and tl_chart_own ? tlc_up : na, 'Chart TF UP price', color=tl_col_up, linewidth=1, trackprice=false, show_last=1, display=display.pane + display.price_scale)
+plot(show_tlines and tl_chart_own ? tlc_dn : na, 'Chart TF DOWN price', color=tl_col_dn, linewidth=1, trackprice=false, show_last=1, display=display.pane + display.price_scale)
 // names on the lines (plot titles cannot carry the timeframe), right of the last candle
 var array<label> tl_labels = array.new<label>()
+// the dotted line across the chart for each level that exists now. Drawn here rather than with trackprice: trackprice
+// kept the last value of a level that had gone (the 5M UP level stayed dotted at its old price after the 5M broke it)
+var array<line> tl_lines = array.new<line>()
 if barstate.islast
     while tl_labels.size() > 0
         tl_labels.pop().delete()
+    while tl_lines.size() > 0
+        tl_lines.pop().delete()
     if show_tlines
         array<float> tl_px = array.from(tlh_up, tlh_dn, tlm_up, tlm_dn, tl_low_own ? tll_up : na, tl_low_own ? tll_dn : na, tl_chart_own ? tlc_up : na, tl_chart_own ? tlc_dn : na)
         array<string> tl_nm = array.from(tf_name(TF2) + " UP", tf_name(TF2) + " DOWN", tf_name(trend_tf) + " UP", tf_name(trend_tf) + " DOWN", tf_name(TF0) + " UP", tf_name(TF0) + " DOWN", tf_name(timeframe.period) + " UP", tf_name(timeframe.period) + " DOWN")
@@ -1809,6 +1814,7 @@ if barstate.islast
                         first := false
                         break
             if not na(v) and first
+                tl_lines.push(line.new(bar_index - 1, v, bar_index, v, extend=extend.both, color=k % 2 == 0 ? tl_col_up : tl_col_dn, width=1, style=line.style_dotted))
                 string txt = tl_nm.get(k)
                 if k < 7
                     for q = k + 1 to 7

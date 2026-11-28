@@ -66,6 +66,7 @@ string scan_group = 'Scanner'
 int alert_min = input.int(14, 'Valid Setup Score', minval=0, maxval=20, group=scan_group, tooltip='A target zone whose automatic score reaches this is a valid setup on the board. The alert payload carries every score, so the board can show the rest too.')
 bool alerts_on = input.bool(true, 'Send Setup Alerts', group=scan_group, tooltip='Fires alert() on every bar close with both target zones and their scores as JSON (an empty list when there is no target, so the board can see the alert is alive). Create one alert per symbol: condition Jay S&D, Any alert() function call, Once per bar close, with the webhook URL from the Zone Scorecard site. A 1H chart gives an hourly scan.')
 bool show_score = input.bool(true, 'Show Score In Target Label', group=scan_group, tooltip='Adds a SCORE line to each target label with the indicator\'s own point estimate for every check.')
+bool vwap_ct = input.bool(true, 'Counter Trend Touch Needs VWAP Within 1 Band', group=scan_group, tooltip='A counter trend touch is a go only when the zone\'s entry edge is within 1 band of the session VWAP, or past VWAP on the trade\'s side (lab_vwap_confluence.py: +0.67R over 609 trades, all 6 symbols positive, against -0.16R over 689 when stretched past the 1st band). No effect on symbols without volume.')
 float approach_pct = input.float(0.8, 'Approach Alert At (share of the way)', minval=0.1, maxval=0.99, step=0.05, group=scan_group, tooltip='Fires the "Price near a target zone" alert condition when price has covered this share of the distance between the two target zones, heading into one of them. Create a separate alert for it with sound on.')
 string ema_group = 'EMA Confluence'
 bool show_ema = input.bool(true, 'Show EMAs', group=ema_group, tooltip='Draws the three EMAs of the chart timeframe, so they follow the candles on whatever chart is open. The EMA signal, the GO check and the 9 EMA exit still use the Low timeframe (the entry timeframe).')
@@ -594,6 +595,57 @@ put_open(io_0, io0_t, io0_o)
 put_open(io_1, io1_t, io1_o)
 put_open(io_2, io2_t, io2_o)
 put_open(io_c, time, open)
+// VWAP (Jay's TradingView VWAP: Session anchor, hlc3, bands at 1 and 2 standard deviations), worked out here and read
+// on the trade box only, no lines drawn. On the chart's own timeframe and prices. CFDs carry no volume (CMC US30), so
+// they borrow the matching future's volume, as the backtest did (YM for US30 on the CFD's prices)
+string tk = str.upper(syminfo.ticker)
+string vw_proxy = str.contains(tk, "US30") or str.contains(tk, "DJI") or str.contains(tk, "WS30") ? "CBOT_MINI:YM1!" :
+     str.contains(tk, "NAS100") or str.contains(tk, "US100") or str.contains(tk, "USTEC") or str.contains(tk, "NDX") ? "CME_MINI:NQ1!" :
+     str.contains(tk, "US500") or str.contains(tk, "SPX") or str.contains(tk, "SP500") ? "CME_MINI:ES1!" :
+     str.contains(tk, "US2000") or str.contains(tk, "RUT") ? "CME_MINI:RTY1!" :
+     str.contains(tk, "XAU") or str.contains(tk, "GOLD") ? "COMEX:GC1!" :
+     str.contains(tk, "XAG") or str.contains(tk, "SILVER") ? "COMEX:SI1!" :
+     str.contains(tk, "USOIL") or str.contains(tk, "WTI") or str.contains(tk, "USCRUDE") ? "NYMEX:CL1!" : ""
+float vw_pvol = request.security(vw_proxy == "" ? syminfo.tickerid : vw_proxy, timeframe.period, volume, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+var bool vw_own = false
+vw_own := vw_own or nz(volume) > 0
+float vw_vol = vw_own or vw_proxy == "" ? nz(volume) : nz(vw_pvol)
+var float vw_cv = 0.0
+var float vw_cpv = 0.0
+var float vw_cp2v = 0.0
+if timeframe.change("D")
+    vw_cv := 0.0
+    vw_cpv := 0.0
+    vw_cp2v := 0.0
+vw_cv += vw_vol
+vw_cpv += hlc3 * vw_vol
+vw_cp2v += hlc3 * hlc3 * vw_vol
+float vw_v = vw_cv > 0 ? vw_cpv / vw_cv : na
+float vw_sd = vw_cv > 0 ? math.sqrt(math.max(vw_cp2v / vw_cv - vw_v * vw_v, 0.0)) : na
+string vw_src = vw_own or vw_proxy == "" ? "" : " (" + str.replace(str.replace(vw_proxy, "CBOT_MINI:", ""), "CME_MINI:", "") + " volume)"
+// the zone's entry edge from VWAP in band widths, signed with the trade: negative = buying under VWAP or selling over
+// it (stretched), positive = past VWAP on the trade's side. na without volume
+vwap_z(Zone z, bool is_supply) =>
+    float near = is_supply ? z.b.get_bottom() : z.b.get_top()
+    na(vw_v) or not (vw_sd > 0) ? na : (near - vw_v) / vw_sd * (is_supply ? -1 : 1)
+// the VWAP read for the trade box (lab_vwap_confluence.py, the indicator's own zones on 6 symbols, Scalping GO trades
+// to the target zone: within 1 band +0.33R, past the 2nd band against the trade -0.29R; Day: a band line through the
+// zone +0.28R against +0.10R without)
+vwap_line(Zone z, bool is_supply) =>
+    float zz = vwap_z(z, is_supply)
+    string out = "VWAP: no volume on this symbol"
+    if not na(zz)
+        float raw = zz * (is_supply ? -1 : 1)
+        string thru = ""
+        for k = -2 to 2
+            float lv = vw_v + k * vw_sd
+            if lv >= z.b.get_bottom() and lv <= z.b.get_top()
+                thru := k == 0 ? "VWAP" : (k > 0 ? "SELL " : "BUY ") + (math.abs(k) == 1 ? "1st" : "2nd") + " band"
+        string verdict = zz < -2 ? "STRETCHED past the 2nd band (worst spot)" : zz < -1 ? "STRETCHED past the 1st band" : zz < 1 ? "NEAR VWAP (best spot)" : "past VWAP with the trade"
+        // the bands above VWAP are the SELL side, the ones below the BUY side
+        out := "VWAP " + str.tostring(vw_v, format.mintick) + vw_src + "\nSELL 2nd " + str.tostring(vw_v + 2 * vw_sd, format.mintick) + " | SELL 1st " + str.tostring(vw_v + vw_sd, format.mintick) + "\nBUY 1st " + str.tostring(vw_v - vw_sd, format.mintick) + " | BUY 2nd " + str.tostring(vw_v - 2 * vw_sd, format.mintick) + "\nzone " + str.tostring(math.abs(raw), "#.#") + " bands " + (raw >= 0 ? "above" : "below") + " VWAP: " + verdict + (thru != "" ? " | " + thru + " runs through the zone" : "")
+    out
+
 // the price the impulse opened at when it opened past the zone's near edge (na when it did not or is not known)
 gap_open(Zone z, bool is_supply) =>
     map<int, float> m = z.slot == 0 ? io_0 : z.slot == 1 ? io_1 : z.slot == 2 ? io_2 : io_c
@@ -1885,11 +1937,15 @@ score_zone(Zone z, bool is_supply, float r_top, float r_btm, box opp, string opp
 // A Touch entry (fresh zone) is a go on trend and EMA, not on the score: with the Mid trend and the EMA signal with the
 // zone. Backtest on the indicator's own zones (lab_backtest.py, 6 symbols, 4 styles): +0.19R / +0.22R / +0.34R per trade
 // on Day / Swing / Longer Swing against +0.13R / +0.12R / +0.18R for the score rule. Zone and Exit entries keep the score rule
-entry_state(Zone z, int total, int ema_n, int slot, int et, int s_trend) =>
+entry_state(Zone z, bool is_supply, int total, int ema_n, int slot, int et, int s_trend) =>
     // counter trend touch under 1 hour (lab_counter_trend.py, the indicator's own zones on 6 symbols): against the Mid
     // trend with the EMA signal with the zone, +0.54R per trade to the target zone over 709 trades (21% win, hold for
     // the target: a fixed 2R gave +0.06R); with the EMA against it lost. Needs the score a with-trend setup would need
-    bool ct = et == 1 and s_trend == 0 and timeframe.in_seconds(slot_tf(slot)) < 3600 and total >= go_min - 4
+    // and only near VWAP: within 1 band of it or past it on the trade's side (lab_vwap_confluence.py: +0.67R over 609
+    // trades against -0.16R over 689 stretched past the 1st band)
+    float vz = vwap_z(z, is_supply)
+    bool ct_far = vwap_ct and not na(vz) and vz < -1
+    bool ct = et == 1 and s_trend == 0 and timeframe.in_seconds(slot_tf(slot)) < 3600 and total >= go_min - 4 and not ct_far
     bool valid = et == 1 ? (s_trend == 4 or ct) : total >= go_min
     string tf = tf_name(slot_tf(slot))
     // the gap-away entry is taken right after the gap: it is live for the first two candles of the zone's timeframe after
@@ -1906,7 +1962,7 @@ entry_state(Zone z, int total, int ema_n, int slot, int et, int s_trend) =>
     string why = et == 2 ? "zone entry, a " + tf + " candle closed inside" : et == 3 ? "exit entry, a " + tf + " candle closed back out" :
          z.inside ? (ct ? "COUNTER TREND touch entry: hold for the target zone, no 2R exit" : "touch entry, retest now") : "gap away, no retest needed"
     string wait = et == 1 ? "WAIT FOR RETEST (touch entry)" : et == 2 ? (z.inside ? "WAIT FOR A " + tf + " CLOSE INSIDE (zone entry)" : "WAIT FOR PRICE (zone entry)") : (z.inside ? "WAIT FOR A " + tf + " CLOSE BACK OUT (exit entry)" : "WAIT FOR PRICE TO GO IN AND TURN (exit entry)")
-    string st = et == 0 ? "NO (one and done: this " + tf + " zone has had its touch)" : late and not gap_live ? "NO (late: a " + tf + " candle already closed inside the zone)" : not valid ? (et == 1 ? (s_trend == 0 and timeframe.in_seconds(slot_tf(slot)) < 3600 ? "NO (counter trend touch needs score " + str.tostring(go_min - 4) + ")" : "NO (touch entry needs the " + tf_name(TF1) + " trend with the zone)") : "NO (score under " + str.tostring(go_min) + ")") : not timing ? wait : not ema_ok ? "WAIT FOR EMA (" + why + ", EMA not with the zone)" : "GO (" + why + ")"
+    string st = et == 0 ? "NO (one and done: this " + tf + " zone has had its touch)" : late and not gap_live ? "NO (late: a " + tf + " candle already closed inside the zone)" : not valid ? (et == 1 ? (s_trend == 0 and timeframe.in_seconds(slot_tf(slot)) < 3600 ? (ct_far and total >= go_min - 4 ? "NO (counter trend touch stretched " + str.tostring(-vz, "#.#") + " bands from VWAP, needs within 1)" : "NO (counter trend touch needs score " + str.tostring(go_min - 4) + ")") : "NO (touch entry needs the " + tf_name(TF1) + " trend with the zone)") : "NO (score under " + str.tostring(go_min) + ")") : not timing ? wait : not ema_ok ? "WAIT FOR EMA (" + why + ", EMA not with the zone)" : "GO (" + why + ")"
     [go, st]
 
 score_line(int total, int s_range, int s_time, int s_trend, int s_move, int s_os, int s_pur, int s_rrr, float rrr, float ratio, float pos, string opp_nm, float r_top, float r_btm, string r_top_nm, string r_btm_nm, bool split) =>
@@ -1968,13 +2024,13 @@ if barstate.islast
         int s_typ = used_up(tgt_sup) ? 0 : entry_type(a6, a3)
         // the trade on the latest visit keeps the type that visit had
         int s_typ_last = tgt_sup.touches == 0 ? 1 : entry_type(purity_of(tgt_sup, true), a3)
-        [s_go, s_ent] = entry_state(tgt_sup, tot, s_en, tgt_sup_slot, s_typ, a3)
+        [s_go, s_ent] = entry_state(tgt_sup, true, tot, s_en, tgt_sup_slot, s_typ, a3)
         [s_tr, s_trt, s_n, s_k1, s_ke, s_re] = trade_walk(tgt_sup, true, s_typ_last)
         trade_marks(true, s_tr, s_k1, s_ke, s_re)
         be_now := be_now or (s_tr == 2 and s_tr_prev == 1)
         exit_now := exit_now or (s_tr >= 3 and s_tr_prev >= 1 and s_tr_prev <= 2)
         s_tr_prev := s_tr
-        mark_target(tgt_sup_slot, true, tgt_sup, tgt_sup_tag, (show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, r_top, r_btm, r_top_nm, r_btm_nm, spl) + "\n" : "") + s_et + (s_trt != "" ? "\n" + s_trt : ""), s_ent, s_go, tot)
+        mark_target(tgt_sup_slot, true, tgt_sup, tgt_sup_tag, (show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, r_top, r_btm, r_top_nm, r_btm_nm, spl) + "\n" : "") + vwap_line(tgt_sup, true) + "\n" + s_et + (s_trt != "" ? "\n" + s_trt : ""), s_ent, s_go, tot)
         s_json := setup_json(tgt_sup, true, tgt_sup_slot, tgt_sup_tag, tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, s_go, s_ent, s_en)
     if not na(tgt_dem)
         box opp = na
@@ -1994,13 +2050,13 @@ if barstate.islast
         int d_typ = used_up(tgt_dem) ? 0 : entry_type(a6, a3)
         // the trade on the latest visit keeps the type that visit had
         int d_typ_last = tgt_dem.touches == 0 ? 1 : entry_type(purity_of(tgt_dem, true), a3)
-        [d_go, d_ent] = entry_state(tgt_dem, tot, d_en, tgt_dem_slot, d_typ, a3)
+        [d_go, d_ent] = entry_state(tgt_dem, false, tot, d_en, tgt_dem_slot, d_typ, a3)
         [d_tr, d_trt, d_n, d_k1, d_ke, d_re] = trade_walk(tgt_dem, false, d_typ_last)
         trade_marks(false, d_tr, d_k1, d_ke, d_re)
         be_now := be_now or (d_tr == 2 and d_tr_prev == 1)
         exit_now := exit_now or (d_tr >= 3 and d_tr_prev >= 1 and d_tr_prev <= 2)
         d_tr_prev := d_tr
-        mark_target(tgt_dem_slot, false, tgt_dem, tgt_dem_tag, (show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, r_top, r_btm, r_top_nm, r_btm_nm, spl) + "\n" : "") + d_et + (d_trt != "" ? "\n" + d_trt : ""), d_ent, d_go, tot)
+        mark_target(tgt_dem_slot, false, tgt_dem, tgt_dem_tag, (show_score ? score_line(tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, r_top, r_btm, r_top_nm, r_btm_nm, spl) + "\n" : "") + vwap_line(tgt_dem, false) + "\n" + d_et + (d_trt != "" ? "\n" + d_trt : ""), d_ent, d_go, tot)
         d_json := setup_json(tgt_dem, false, tgt_dem_slot, tgt_dem_tag, tot, a1, a2, a3, a4, a5, a6, a7, rr, mr, rp, onm, d_go, d_ent, d_en)
     if not na(tgt_sup) and not na(tgt_dem)
         float s_edge = tgt_sup.b.get_bottom()
